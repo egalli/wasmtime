@@ -31,7 +31,7 @@ impl RuntimeValue {
             Self::I64(_) => ir::types::I64,
             Self::F32(_) => ir::types::F32,
             Self::F64(_) => ir::types::F64,
-            Self::V128(_) => ir::types::I8X16,
+            Self::V128(_) => ir::types::X128,
         }
     }
 

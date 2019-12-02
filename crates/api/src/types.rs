@@ -71,7 +71,7 @@ impl ValType {
             ValType::I64 => ir::types::I64,
             ValType::F32 => ir::types::F32,
             ValType::F64 => ir::types::F64,
-            ValType::V128 => ir::types::I8X16,
+            ValType::V128 => ir::types::X128,
             _ => unimplemented!("get_wasmtime_type other"),
         }
     }
@@ -82,7 +82,7 @@ impl ValType {
             ir::types::I64 => ValType::I64,
             ir::types::F32 => ValType::F32,
             ir::types::F64 => ValType::F64,
-            ir::types::I8X16 => ValType::V128,
+            ir::types::X128 => ValType::V128,
             _ => unimplemented!("from_wasmtime_type other"),
         }
     }
