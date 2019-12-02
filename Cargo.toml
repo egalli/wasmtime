@@ -52,6 +52,13 @@ test-programs = { path = "crates/test-programs" }
 [build-dependencies]
 anyhow = "1.0.19"
 
+[replace]
+"cranelift-codegen:0.51.0" = { path = "../cranelift/cranelift-codegen", features = ["enable-serde"] }
+"cranelift-native:0.51.0" = { path = "../cranelift/cranelift-native" }
+"cranelift-wasm:0.51.0" = { path = "../cranelift/cranelift-wasm", features = ["enable-serde"] }
+"cranelift-entity:0.51.0" = { path = "../cranelift/cranelift-entity", features = ["enable-serde"] }
+"cranelift-frontend:0.51.0" = { path = "../cranelift/cranelift-frontend" }
+
 [workspace]
 members = [
   "crates/fuzzing",
