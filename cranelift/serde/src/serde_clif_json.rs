@@ -45,6 +45,11 @@ pub enum SerInstData {
         opcode: String,
         args: Vec<String>,
     },
+    MultiAryImm {
+        opcode: String,
+        args: Vec<String>,
+        imm: String,
+    },
     NullAry {
         opcode: String,
     },
@@ -317,6 +322,23 @@ pub fn get_inst_data(inst_index: Inst, func: &Function) -> SerInstData {
 
             SerInstData::MultiAry {
                 opcode: opcode.to_string(),
+                args: hold_args,
+            }
+        }
+        InstructionData::MultiAryImm {
+            opcode,
+            imm,
+            ref args,
+        } => {
+            let mut hold_args = Vec::new();
+            let args_iter = args.as_slice(&func.dfg.value_lists);
+            for arg in args_iter {
+                hold_args.push(arg.to_string());
+            }
+
+            SerInstData::MultiAryImm {
+                opcode: opcode.to_string(),
+                imm: imm.to_string(),
                 args: hold_args,
             }
         }

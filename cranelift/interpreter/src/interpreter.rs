@@ -4,7 +4,9 @@
 
 use crate::environment::Environment;
 use crate::frame::Frame;
+use crate::tracing::{Trace, TracedInstruction};
 use crate::value::Value;
+use core::cell::RefCell;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Imm64;
 use cranelift_codegen::ir::{
@@ -44,11 +46,15 @@ pub enum Trap {
 #[derive(Default)]
 pub struct Interpreter {
     pub env: Environment,
+    pub trace: RefCell<Trace>,
 }
 
 impl Interpreter {
     pub fn new(env: Environment) -> Self {
-        Self { env }
+        Self {
+            env,
+            trace: RefCell::new(Trace::default()),
+        }
     }
 
     pub fn call_by_name(&self, func_name: &str, arguments: &[Value]) -> Result<ControlFlow, Trap> {
@@ -64,6 +70,9 @@ impl Interpreter {
         func_ref: FuncRef,
         arguments: &[Value],
     ) -> Result<ControlFlow, Trap> {
+        self.trace
+            .borrow_mut()
+            .observe(TracedInstruction::EnterFunction(func_ref));
         match self.env.get_by_func_ref(func_ref) {
             None => Err(Trap::InvalidFunctionReference(func_ref)),
             Some(func) => self.call(func, arguments),
@@ -80,6 +89,9 @@ impl Interpreter {
         let parameters = function.dfg.block_params(first_block);
         let mut frame = Frame::new(function).with_parameters(parameters, arguments);
         let result = self.block(&mut frame, first_block);
+        self.trace
+            .borrow_mut()
+            .observe(TracedInstruction::ExitFunction);
         result
     }
 
@@ -139,6 +151,9 @@ impl Interpreter {
     fn inst(&self, frame: &mut Frame, inst: Inst) -> Result<ControlFlow, Trap> {
         use ControlFlow::{Continue, ContinueAt};
         debug!("Inst: {}", &frame.function.dfg.display_inst(inst, None));
+        self.trace
+            .borrow_mut()
+            .observe(TracedInstruction::Instruction(inst));
 
         let data = &frame.function.dfg[inst];
         match data {
@@ -249,6 +264,14 @@ impl Interpreter {
                 }
                 _ => unimplemented!(),
             },
+            MultiAryImm { opcode, .. } => match opcode {
+                TraceStart => {
+                    // TODO ensure we aren't already tracing, use ID
+                    self.trace.borrow_mut().start();
+                    Ok(Continue)
+                }
+                _ => unimplemented!(),
+            },
             NullAry { opcode } => match opcode {
                 Nop => Ok(Continue),
                 _ => unimplemented!(),
@@ -257,6 +280,12 @@ impl Interpreter {
                 Iconst => {
                     let res = first_result(frame.function, inst);
                     self.iconst(frame, *imm, res);
+                    Ok(Continue)
+                }
+                TraceEnd => {
+                    // TODO ensure start and end IDs match
+                    self.trace.borrow_mut().end();
+                    self.trace.borrow_mut().remove_last();
                     Ok(Continue)
                 }
                 _ => unimplemented!(),

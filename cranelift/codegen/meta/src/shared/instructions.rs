@@ -3890,5 +3890,40 @@ pub(crate) fn define(
         .is_ghost(true),
     );
 
+    let id = &Operand::new("id", &imm.imm64)
+        .with_doc("identifies a pair of `trace_start` and `trace_end`");
+    let greens = &Operand::new("greens", &entities.varargs).with_doc(
+        "values used to identify a runtime trace context; two `trace_start`s with the same \
+         green values must result in the same trace",
+    );
+    ig.push(
+        Inst::new(
+            "trace_start",
+            r#"
+        Start tracing observed operations.
+
+        If tracing is enabled, the Cranelift interpreter will use this to collect a trace of
+        interpreted instructions.
+        "#,
+            &formats.multiary_imm,
+        )
+        .operands_in(vec![id, greens])
+        .is_ghost(true),
+    );
+    ig.push(
+        Inst::new(
+            "trace_end",
+            r#"
+        Stop tracing observed operations.
+
+        If tracing is enabled, the Cranelift interpreter will use this to stop collecting a trace
+        of interpreted instructions.
+        "#,
+            &formats.unary_imm,
+        )
+        .operands_in(vec![id])
+        .is_ghost(true),
+    );
+
     ig.build()
 }

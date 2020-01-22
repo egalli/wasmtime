@@ -34,6 +34,7 @@ pub(crate) struct Formats {
     pub(crate) load: Rc<InstructionFormat>,
     pub(crate) load_complex: Rc<InstructionFormat>,
     pub(crate) multiary: Rc<InstructionFormat>,
+    pub(crate) multiary_imm: Rc<InstructionFormat>,
     pub(crate) nullary: Rc<InstructionFormat>,
     pub(crate) reg_fill: Rc<InstructionFormat>,
     pub(crate) reg_move: Rc<InstructionFormat>,
@@ -91,6 +92,11 @@ impl Formats {
             // Catch-all for instructions with many outputs and inputs and no immediate
             // operands.
             multiary: Builder::new("MultiAry").varargs().build(),
+
+            multiary_imm: Builder::new("MultiAryImm")
+                .varargs()
+                .imm(&imm.imm64)
+                .build(),
 
             nullary: Builder::new("NullAry").build(),
 

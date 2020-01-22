@@ -769,6 +769,7 @@ impl<'a> Verifier<'a> {
             | CondTrap { .. }
             | IntCondTrap { .. }
             | FloatCondTrap { .. }
+            | MultiAryImm { .. }
             | NullAry { .. } => {}
         }
 

@@ -2415,6 +2415,21 @@ impl<'a> Parser<'a> {
                     args: args.into_value_list(&[], &mut ctx.function.dfg.value_lists),
                 }
             }
+            InstructionFormat::MultiAryImm => {
+                let args = if self.optional(Token::LBracket) {
+                    let args = self.parse_value_list()?;
+                    self.match_token(Token::RBracket, "expected a terminating bracket")?;
+                    args
+                } else {
+                    VariableArgs::default()
+                };
+                let imm = self.match_imm64("expected immediate integer operand")?;
+                InstructionData::MultiAryImm {
+                    opcode,
+                    imm,
+                    args: args.into_value_list(&[], &mut ctx.function.dfg.value_lists),
+                }
+            }
             InstructionFormat::NullAry => InstructionData::NullAry { opcode },
             InstructionFormat::Jump => {
                 // Parse the destination block number.
@@ -3475,5 +3490,27 @@ mod tests {
             c.into_vec(),
             [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
         )
+    }
+
+    #[test]
+    fn parse_multiary_imm_with_args() {
+        let code = "function %test(i8, i16) {
+        block0(v0: i8, v1: i16):
+            trace_start [v0, v1] 42
+            return
+        }";
+        let mut parser = Parser::new(code);
+        parser.parse_function(None).unwrap();
+    }
+
+    #[test]
+    fn parse_multiary_imm_without_args() {
+        let code = "function %test(i8, i16) {
+        block0(v0: i8, v1: i16):
+            trace_start 42
+            return
+        }";
+        let mut parser = Parser::new(code);
+        parser.parse_function(None).unwrap();
     }
 }
