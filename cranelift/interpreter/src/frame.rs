@@ -1,7 +1,7 @@
 //! Implements a call frame (activation record) for the Cranelift interpreter.
 
 use crate::value::Value;
-use cranelift_codegen::ir::{Function, Value as ValueRef};
+use cranelift_codegen::ir::{FuncRef, Function, Value as ValueRef};
 use std::collections::HashMap;
 
 /// Holds the mutable elements of an interpretation. At some point I thought about using
@@ -11,6 +11,9 @@ use std::collections::HashMap;
 /// untenable.
 #[derive(Debug)]
 pub struct Frame<'a> {
+    // TODO we really should have one or the other of `func_ref` or `function`...
+    /// The function reference of the currently executing function.
+    pub func_ref: FuncRef,
     /// The currently executing function.
     pub function: &'a Function,
     /// The current mapping of SSA value-references to their actual values.
@@ -21,8 +24,9 @@ impl<'a> Frame<'a> {
     /// Construct a new frame for a function. This allocates a slot in the hash map for each SSA
     /// `Value` (renamed as `ValueRef` here) which should mean that no additional allocations are
     /// needed while interpreting the frame.
-    pub fn new(function: &'a Function) -> Self {
+    pub fn new(func_ref: FuncRef, function: &'a Function) -> Self {
         Self {
+            func_ref,
             function,
             registers: HashMap::with_capacity(function.dfg.num_values()),
         }
@@ -97,13 +101,13 @@ mod tests {
     fn construction() {
         let func = empty_function();
         // construction should not fail
-        Frame::new(&func);
+        Frame::new(FuncRef::from_u32(0), &func);
     }
 
     #[test]
     fn assignment() {
         let func = empty_function();
-        let mut frame = Frame::new(&func);
+        let mut frame = Frame::new(FuncRef::from_u32(0), &func);
 
         let a = ValueRef::with_number(1).unwrap();
         let fortytwo = Value::Int(42);
@@ -115,7 +119,7 @@ mod tests {
     #[should_panic]
     fn no_existing_value() {
         let func = empty_function();
-        let frame = Frame::new(&func);
+        let frame = Frame::new(FuncRef::from_u32(0), &func);
 
         let a = ValueRef::with_number(1).unwrap();
         frame.get(&a);

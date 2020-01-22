@@ -70,29 +70,27 @@ impl Interpreter {
         func_ref: FuncRef,
         arguments: &[Value],
     ) -> Result<ControlFlow, Trap> {
-        self.trace
-            .borrow_mut()
-            .observe(TracedInstruction::EnterFunction(func_ref));
-        match self.env.get_by_func_ref(func_ref) {
-            None => Err(Trap::InvalidFunctionReference(func_ref)),
-            Some(func) => self.call(func, arguments),
-        }
-    }
+        if let Some(function) = self.env.get_by_func_ref(func_ref) {
+            debug!("Call: {}({:?})", function.name, arguments);
+            self.trace
+                .borrow_mut()
+                .observe(TracedInstruction::EnterFunction(func_ref));
 
-    fn call(&self, function: &Function, arguments: &[Value]) -> Result<ControlFlow, Trap> {
-        debug!("Call: {}({:?})", function.name, arguments);
-        let first_block = function
-            .layout
-            .blocks()
-            .next()
-            .expect("to have a first block");
-        let parameters = function.dfg.block_params(first_block);
-        let mut frame = Frame::new(function).with_parameters(parameters, arguments);
-        let result = self.block(&mut frame, first_block);
-        self.trace
-            .borrow_mut()
-            .observe(TracedInstruction::ExitFunction);
-        result
+            let first_block = function
+                .layout
+                .blocks()
+                .next()
+                .expect("to have a first block");
+            let parameters = function.dfg.block_params(first_block);
+            let mut frame = Frame::new(func_ref, function).with_parameters(parameters, arguments);
+            let result = self.block(&mut frame, first_block);
+            self.trace
+                .borrow_mut()
+                .observe(TracedInstruction::ExitFunction);
+            result
+        } else {
+            Err(Trap::InvalidFunctionReference(func_ref))
+        }
     }
 
     fn block(&self, frame: &mut Frame, block: Block) -> Result<ControlFlow, Trap> {
@@ -267,7 +265,7 @@ impl Interpreter {
             MultiAryImm { opcode, .. } => match opcode {
                 TraceStart => {
                     // TODO ensure we aren't already tracing, use ID
-                    self.trace.borrow_mut().start();
+                    self.trace.borrow_mut().start(frame.func_ref);
                     Ok(Continue)
                 }
                 _ => unimplemented!(),
