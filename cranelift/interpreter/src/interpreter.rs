@@ -43,14 +43,13 @@ pub enum Trap {
 
 /// The Cranelift interpreter; it contains immutable elements such as the function environment and
 /// implements the Cranelift IR semantics.
-#[derive(Default)]
-pub struct Interpreter {
-    pub env: Environment,
+pub struct Interpreter<'a> {
+    pub env: &'a Environment,
     pub trace: RefCell<Trace>,
 }
 
-impl Interpreter {
-    pub fn new(env: Environment) -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(env: &'a Environment) -> Self {
         Self {
             env,
             trace: RefCell::new(Trace::default()),
@@ -160,6 +159,12 @@ impl Interpreter {
                     // TODO trap if arguments are of the wrong type; here and below
                     let res = first_result(frame.function, inst);
                     self.binary(frame, Add::add, args[0], args[1], res);
+                    Ok(Continue)
+                }
+                Isub => {
+                    // TODO trap if arguments are of the wrong type; here and below
+                    let res = first_result(frame.function, inst);
+                    self.binary(frame, Sub::sub, args[0], args[1], res);
                     Ok(Continue)
                 }
                 _ => unimplemented!(),

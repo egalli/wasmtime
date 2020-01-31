@@ -3,8 +3,9 @@
 use crate::clif::parser::{ClifCommand, Comparison, Invoke, Parse, ParseBuffer, ParseFailure};
 use crate::environment::Environment;
 use crate::interpreter::{ControlFlow, Interpreter, Trap};
+use crate::tracing::Trace;
 use crate::value::Value;
-use cranelift_reader::{parse_test, ParseError, ParseOptions};
+use cranelift_reader::{parse_test, Comment, ParseError, ParseOptions};
 use log::debug;
 use std::path::PathBuf;
 use std::{fs, io};
@@ -45,9 +46,8 @@ impl FileRunner {
         }
     }
 
-    /// Run the file; this searches for annotations like `; run: %fn0(42)` or
-    /// `; test: %fn0(42) == 2` and executes them, performing any test comparisons if necessary.
-    pub fn run(&self) -> Result<(), FileRunnerFailure> {
+    /// Parse the CLIF code into an `Environment` and `Comment`s.
+    pub fn parse(&self) -> Result<(Environment, Vec<Comment>), FileRunnerFailure> {
         // parse file
         let test = parse_test(&self.contents, ParseOptions::default())
             .map_err(|e| FileRunnerFailure::ParsingClif(self.path(), e))?;
@@ -62,8 +62,17 @@ impl FileRunner {
             comments.append(&mut details.comments.clone());
         }
 
+        Ok((env, comments))
+    }
+
+    /// Run the file; this searches for annotations like `; run: %fn0(42)` or
+    /// `; test: %fn0(42) == 2` and executes them, performing any test comparisons if necessary.
+    pub fn run(&self) -> Result<(Environment, Vec<Trace>), FileRunnerFailure> {
+        let (env, comments) = self.parse()?;
+
         // run assertions
-        let interpreter = Interpreter::new(env);
+        let interpreter = Interpreter::new(&env);
+        let mut traces = Vec::new();
         for comment in comments {
             if !(comment.text.starts_with("; run:") || comment.text.starts_with("; test:")) {
                 continue;
@@ -91,8 +100,15 @@ impl FileRunner {
                     }
                 }
             }
+
+            // record any traces
+            let trace = interpreter.trace.replace(Trace::default());
+            if trace.len() > 0 {
+                traces.push(trace);
+            }
         }
-        Ok(())
+        
+        Ok((env, traces))
     }
 
     // TODO add call(name, args) -> returns
