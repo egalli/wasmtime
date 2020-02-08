@@ -1,10 +1,27 @@
 //! Implements the tracing functionality for the Cranelift interpreter.
 
 use crate::environment::Environment;
-use cranelift_codegen::cursor::{Cursor, FuncCursor};
-use cranelift_codegen::ir::{AbiParam, FuncRef, Function, Inst, InstructionData, Opcode, Value};
+use cranelift_codegen::ir::{
+    AbiParam, Ebb, FuncRef, Function, Inst, InstructionData, Opcode, Value,
+};
 use log::debug;
 use std::collections::HashMap;
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TracedInstruction {
+    // TODO need to decide between storing a FuncRef here or a &'a Function:
+    // - a FuncRef means we have to add FuncRef to Frame (or reverse lookup) and pass around an
+    // Environment; plus some overhead from lookup in the Function in Environment
+    // - a &'a Function means we have larger TracedInstructions (64bit pointer) and may have to
+    // deal with borrowing issues (the Frame lifetime will likely not outlive the Trace lifetime
+    // and we are borrowing &Function from Frame to Trace)
+    StartInFunction(FuncRef),
+    EnterFunction(FuncRef), // TODO this may not be very helpful if we already trace call/returns
+    ExitFunction,           // TODO this may not be very helpful if we already trace call/returns
+    Instruction(Inst),
+    Guard(Inst),
+    //Loop,
+}
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Trace {
@@ -111,6 +128,37 @@ impl<'a> Iterator for TraceIterator<'a> {
     }
 }
 
+/// Helpful reconstruction type aliases.
+type OldValue = Value;
+type NewValue = Value;
+type CallResults = Vec<Value>;
+type StackFrame = (FuncRef, Renumberings, CallResults);
+
+/// Track the mapping of old SSA values to new SSA values.
+///
+/// Because of how `Function` tracks its values, we must renumber all of the SSA values in the
+/// instructions it contains. This struct maintains the mapping between old and new SSA values.
+struct Renumberings(HashMap<OldValue, NewValue>);
+
+impl Renumberings {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    fn get(&self, old: &OldValue) -> Option<&NewValue> {
+        self.0.get(old)
+    }
+
+    fn renumber(&mut self, old: OldValue, new: NewValue) {
+        debug!("Renumbering {} to {}", old, new);
+        self.0.insert(old, new);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&OldValue, &NewValue)> {
+        self.0.iter()
+    }
+}
+
 /// Reconstruct a `Trace` into a `Function`.
 ///
 /// At first glance, this may seem simple: just append the instructions from the trace into the
@@ -132,186 +180,229 @@ impl<'a> Iterator for TraceIterator<'a> {
 ///  - requirement 4: renumber instruction arguments using either the mapping from requirement 1 or
 /// requirement 2; any non-mapped arguments should be inputs to the trace function (TODO correct?)
 ///
-pub fn to_function(trace: Trace, env: &Environment) -> Function {
-    type OldValue = Value;
-    type NewValue = Value;
-    type Renumberings = HashMap<OldValue, NewValue>;
-    type CallResults = Vec<Value>;
-    type StackFrame = (FuncRef, Renumberings, CallResults);
+pub struct FunctionReconstructor<'a> {
+    inputs: Renumberings,
+    stack: Vec<StackFrame>,
+    trace: &'a Trace,
+    env: &'a Environment,
+}
 
-    let mut renumberings: Renumberings = Renumberings::new();
-    let mut input_renumberings = Renumberings::new(); // values with unknown provenance, used in
-                                                      // EBB header and function signature
-    let mut stack: Vec<StackFrame> = Vec::new();
-    let mut old_func = &Function::new(); // default value, promptly replaced in StartInFunction
-                                         // or EnterFunction
-    let mut new_func = Function::new();
-    let mut cursor = FuncCursor::new(&mut new_func);
-    let ebb = cursor.func.dfg.make_ebb();
-    cursor.insert_ebb(ebb);
-
-    for ti in trace.observed {
-        match ti {
-            TracedInstruction::StartInFunction(f) => {
-                old_func = env
-                    .get_by_func_ref(f)
-                    .expect("the environment to contain a valid function");
-                stack.push((f, Renumberings::new(), CallResults::new()));
-            }
-            TracedInstruction::EnterFunction(_) => {
-                // TODO this could be done by call/return
-                //                old_func = env
-                //                    .get_by_func_ref(f)
-                //                    .expect("the environment to contain a valid function");
-            }
-            TracedInstruction::ExitFunction => {
-                //                // TODO this could be done by call/return
-                //                old_func = env
-                //                    .get_by_func_ref(stack.last().unwrap().0)
-                //                    .expect("the environment to contain a valid function");
-            }
-            TracedInstruction::Instruction(inst) => {
-                let inst_data = old_func.dfg[inst].clone();
-                let new_inst = cursor.func.dfg.make_inst(inst_data);
-
-                let results = old_func.dfg.inst_results(inst);
-                for old_result in results {
-                    // fulfill requirement 1
-                    let old_type = old_func.dfg.value_type(*old_result);
-                    let new_result = cursor.func.dfg.append_result(new_inst, old_type);
-                    renumberings.insert(*old_result, new_result);
-                }
-
-                let mut unknown_args = Vec::new();
-                for old_arg in cursor.func.dfg.inst_args_mut(new_inst) {
-                    // fulfill requirement 4
-                    if let Some(new_arg) = renumberings.get(old_arg) {
-                        *old_arg = *new_arg;
-                    } else if let Some(new_arg) =
-                        stack.last().expect("a stack renumbering").1.get(old_arg)
-                    {
-                        *old_arg = *new_arg;
-                    } else if let Some(new_arg) = input_renumberings.get(old_arg) {
-                        *old_arg = *new_arg;
-                    } else {
-                        unknown_args.push(*old_arg);
-                    }
-                }
-
-                // FIXME this is insane: because we need to `inst_args_mut` and
-                // `append_ebb_param` at the same time, we have to store values in unknown args
-                // and re-examine all of the instruction arguments...
-                for old_arg in unknown_args {
-                    let ty = old_func.dfg.value_type(old_arg);
-                    let new_arg = cursor.func.dfg.append_ebb_param(ebb, ty);
-                    input_renumberings.insert(old_arg, new_arg);
-                }
-                for old_arg in cursor.func.dfg.inst_args_mut(new_inst) {
-                    if let Some(new_arg) = input_renumberings.get(old_arg) {
-                        *old_arg = *new_arg;
-                    }
-                }
-
-                // TODO avoid clone
-                match old_func.dfg[inst].clone() {
-                    InstructionData::Call { args, func_ref, .. } => {
-                        // partially fulfill requirement 2
-                        let caller_results = old_func.dfg.inst_results(inst).to_vec();
-                        let caller_args = args.as_slice(&old_func.dfg.value_lists);
-                        let callee_func = env
-                            .get_by_func_ref(func_ref)
-                            .expect("the called function to exist");
-                        let callee_ebb = callee_func
-                            .layout
-                            .ebbs()
-                            .next()
-                            .expect("to have a first ebb");
-                        let callee_args = callee_func.dfg.ebb_params(callee_ebb);
-                        debug_assert_eq!(caller_args.len(), callee_args.len());
-
-                        let mut local_renumbering: Renumberings = Renumberings::new();
-                        for (old_arg, new_arg) in caller_args.iter().zip(callee_args) {
-                            local_renumbering.insert(*old_arg, *new_arg);
-                        }
-
-                        stack.push((func_ref, local_renumbering, caller_results));
-
-                        // point old_func at the callee
-                        old_func = env
-                            .get_by_func_ref(func_ref)
-                            .expect("the environment to contain a valid function");
-                    }
-                    InstructionData::Jump {
-                        destination, args, ..
-                    } => {
-                        // partially fulfill requirement 2
-                        let caller_args = args.as_slice(&old_func.dfg.value_lists);
-                        let destination_args = old_func.dfg.ebb_params(destination);
-                        debug_assert_eq!(caller_args.len(), destination_args.len());
-
-                        let mut local_renumbering: Renumberings = Renumberings::new();
-                        for (old_arg, new_arg) in caller_args.iter().zip(destination_args) {
-                            local_renumbering.insert(*old_arg, *new_arg);
-                        }
-
-                        // replace local renumbering with the renumbering from the current block
-                        let (func_ref, _, caller_results) =
-                            stack.pop().expect("to have something on the stack");
-                        stack.push((func_ref, local_renumbering, caller_results));
-                    }
-                    InstructionData::MultiAry {
-                        opcode: Opcode::Return,
-                        args,
-                    } => {
-                        // fulfill requirement 3
-                        let (func_ref, _, caller_results) = stack.pop().expect("...");
-                        let callee_returns = args.as_slice(&old_func.dfg.value_lists);
-                        for (old_value, new_value) in caller_results.iter().zip(callee_returns) {
-                            renumberings.insert(*old_value, *new_value);
-                        }
-
-                        // point old_func to the caller function
-                        old_func = env
-                            .get_by_func_ref(func_ref)
-                            .expect("the environment to contain a valid function");
-                    }
-                    _ => {
-                        cursor.insert_inst(new_inst);
-                        debug!(
-                            "Appending instruction: {}",
-                            cursor.func.dfg.display_inst(new_inst, None)
-                        );
-                    }
-                }
-            }
-            TracedInstruction::Guard(_) => {}
+impl<'a> FunctionReconstructor<'a> {
+    pub fn new(trace: &'a Trace, env: &'a Environment) -> Self {
+        Self {
+            inputs: Renumberings::new(),
+            stack: Vec::new(),
+            trace,
+            env,
         }
     }
 
-    // fixup function signature
-    for (_, new_arg) in input_renumberings {
-        let ty = cursor.func.dfg.value_type(new_arg);
-        let param = AbiParam::new(ty);
-        cursor.func.signature.params.push(param);
+    pub fn build(&mut self) -> Function {
+        let mut new_func = Function::new();
+
+        // Add the initial block for the reconstructed trace function (there may be more later to
+        // handle guards).
+        let block = new_func.dfg.make_ebb();
+        new_func.layout.append_ebb(block);
+
+        // Set up the stack using the first meta-instruction.
+        if let TracedInstruction::StartInFunction(func_ref) = self.trace.observed[0] {
+            self.setup(func_ref)
+        } else {
+            panic!(
+                "we expect the first instruction of the trace is expected to be a StartInFunction"
+            );
+        }
+
+        // Iterate over the remaining meta-instructions, building the function as we go.
+        for i in &self.trace.observed[1..] {
+            match i {
+                TracedInstruction::StartInFunction(_) => {
+                    panic!("found another StartInFunction in the trace")
+                }
+                TracedInstruction::EnterFunction(_) | TracedInstruction::ExitFunction => {
+                    /* Ignore, we handle calls/returns using the InstructionData directly */
+                }
+                TracedInstruction::Instruction(i) => {
+                    self.reconstruct_instruction(*i, &mut new_func, block);
+                }
+                TracedInstruction::Guard(_) => { /* TODO */ }
+            }
+        }
+
+        // Add the discovered trace inputs (free SSA values) to the function signature.
+        for (_, new_arg) in self.inputs.iter() {
+            let ty = new_func.dfg.value_type(*new_arg);
+            let param = AbiParam::new(ty);
+            new_func.signature.params.push(param);
+        }
+
+        new_func
     }
 
-    new_func
-}
+    fn setup(&mut self, func_ref: FuncRef) {
+        self.stack
+            .push((func_ref, Renumberings::new(), CallResults::new()));
+    }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum TracedInstruction {
-    // TODO need to decide between storing a FuncRef here or a &'a Function:
-    // - a FuncRef means we have to add FuncRef to Frame (or reverse lookup) and pass around an
-    // Environment; plus some overhead from lookup in the Function in Environment
-    // - a &'a Function means we have larger TracedInstructions (64bit pointer) and may have to
-    // deal with borrowing issues (the Frame lifetime will likely not outlive the Trace lifetime
-    // and we are borrowing &Function from Frame to Trace)
-    StartInFunction(FuncRef),
-    EnterFunction(FuncRef), // TODO this may not be very helpful if we already trace call/returns
-    ExitFunction,           // TODO this may not be very helpful if we already trace call/returns
-    Instruction(Inst),
-    Guard(Inst),
-    //Loop,
+    fn reconstruct_instruction(&mut self, inst: Inst, new_func: &mut Function, block: Ebb) {
+        //let old_func = self.old_func();
+        let inst_data = self.old_func().dfg[inst].clone();
+        match inst_data {
+            InstructionData::Call { args, func_ref, .. } => {
+                // partially fulfill requirement 2
+                let caller_results = self.old_func().dfg.inst_results(inst).to_vec();
+                let caller_args = args.as_slice(&self.old_func().dfg.value_lists);
+                let callee_func = self
+                    .env
+                    .get_by_func_ref(func_ref)
+                    .expect("the called function to exist");
+                let callee_ebb = callee_func
+                    .layout
+                    .ebbs()
+                    .next()
+                    .expect("to have a first ebb");
+                let callee_args = callee_func.dfg.ebb_params(callee_ebb);
+                debug_assert_eq!(caller_args.len(), callee_args.len());
+
+                let mut local_renumbering: Renumberings = Renumberings::new();
+                for (old_arg, new_arg) in caller_args.iter().zip(callee_args) {
+                    local_renumbering.renumber(*old_arg, *new_arg);
+                }
+
+                self.stack
+                    .push((func_ref, local_renumbering, caller_results));
+            }
+            InstructionData::Jump {
+                destination, args, ..
+            } => {
+                // partially fulfill requirement 2
+                // we need to figure out what the jump renumbers the args as and use this
+                // in our renumbering
+                let (func_ref, old_renumbering, caller_results) =
+                    self.stack.pop().expect("to have something on the stack");
+                let caller_args = args.as_slice(&self.func(func_ref).dfg.value_lists);
+                let destination_args = self.func(func_ref).dfg.ebb_params(destination);
+                debug_assert_eq!(caller_args.len(), destination_args.len());
+
+                let mut new_renumbering: Renumberings = Renumberings::new();
+                for (old_arg, new_arg) in caller_args.iter().zip(destination_args) {
+                    if let Some(renumbered_arg) = old_renumbering.get(old_arg) {
+                        new_renumbering.renumber(*new_arg, *renumbered_arg);
+                    } else if let Some(renumbered_arg) = self.inputs.get(old_arg) {
+                        new_renumbering.renumber(*new_arg, *renumbered_arg);
+                    } else {
+                        panic!("don't yet know what to do here");
+                        // local_renumbering.insert(*old_arg, *new_arg);
+                    }
+                }
+
+                // replace local renumbering with the renumbering from the current block
+                self.stack.push((func_ref, new_renumbering, caller_results));
+            }
+            InstructionData::MultiAry {
+                opcode: Opcode::Return,
+                args,
+            } => {
+                // fulfill requirement 3
+                let (func_ref, mut caller_renumbering, caller_results) =
+                    self.stack.pop().expect("...");
+                let callee_returns = args.as_slice(&self.func(func_ref).dfg.value_lists);
+                for (old_value, new_value) in caller_results.iter().zip(callee_returns) {
+                    caller_renumbering.renumber(*old_value, *new_value);
+                }
+            }
+            _ => {
+                // This instruction must be appended so we fixup its SSA values
+                let new_inst = new_func.dfg.make_inst(inst_data);
+
+                // First, the instruction results:
+                let results = self.old_func().dfg.inst_results(inst).to_vec(); // TODO avoid allocation
+                for old_result in results {
+                    // fulfill requirement 1
+                    let old_type = self.old_func().dfg.value_type(old_result);
+                    let new_result = new_func.dfg.append_result(new_inst, old_type);
+                    self.current_renumbering_mut()
+                        .renumber(old_result, new_result);
+                }
+
+                // Then, the instruction arguments:
+                let old_args = new_func.dfg.inst_args(new_inst).to_vec(); // TODO avoid allocation
+                let new_args = old_args
+                    .iter()
+                    .map(|&old_arg| {
+                        match self.find_argument(old_arg) {
+                            None => {
+                                // If we have never observed this SSA value, add it as a free input.
+                                let ty = self.old_func().dfg.value_type(old_arg);
+                                let new_arg = new_func.dfg.append_ebb_param(block, ty);
+                                self.inputs.renumber(old_arg, new_arg);
+                                new_arg
+                            }
+                            Some(a) => a,
+                        }
+                    })
+                    .collect::<Vec<NewValue>>();
+                // Now we can actually replace the arguments:
+                for (old_arg, new_arg) in new_func
+                    .dfg
+                    .inst_args_mut(new_inst)
+                    .iter_mut()
+                    .zip(new_args)
+                {
+                    *old_arg = new_arg;
+                }
+
+                // Finally, append the instruction to the reconstructed function.
+                new_func.layout.append_inst(new_inst, block);
+                debug!(
+                    "Appending instruction: {}",
+                    new_func.dfg.display_inst(new_inst, None)
+                );
+            }
+        }
+    }
+
+    fn func(&self, func_ref: FuncRef) -> &Function {
+        self.env
+            .get_by_func_ref(func_ref)
+            .expect("the environment to contain a valid function")
+    }
+
+    fn old_func(&self) -> &Function {
+        let func_ref = self
+            .stack
+            .last()
+            .expect("there must be at least one stack frame pushed")
+            .0;
+        self.func(func_ref)
+    }
+
+    fn current_renumbering(&self) -> &Renumberings {
+        &self
+            .stack
+            .last()
+            .expect("there must be at least one stack frame pushed")
+            .1
+    }
+
+    fn current_renumbering_mut(&mut self) -> &mut Renumberings {
+        &mut self
+            .stack
+            .last_mut()
+            .expect("there must be at least one stack frame pushed")
+            .1
+    }
+
+    fn find_argument(&self, old_arg: OldValue) -> Option<NewValue> {
+        if let Some(new_arg) = self.current_renumbering().get(&old_arg) {
+            Some(*new_arg)
+        } else if let Some(new_arg) = self.inputs.get(&old_arg) {
+            Some(*new_arg)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -334,12 +425,16 @@ mod tests {
     fn parse(clif: &str) -> Function {
         let test_file = parse_test(clif, ParseOptions::default()).unwrap();
         assert_eq!(1, test_file.functions.len());
-        let function = test_file.functions[0].0.clone();
-        function
+        test_file.functions[0].0.clone() // the first function
+    }
+
+    fn to_function(trace: Trace, environment: Environment) -> Function {
+        FunctionReconstructor::new(&trace, &environment).build()
     }
 
     #[test]
-    fn reconstruct_requirement1() {
+    fn reconstruct_single_ebb() {
+        let _ = pretty_env_logger::try_init();
         let (env, trace) = interpret(
             "
             function %test(i32, i32) -> i32 {
@@ -352,7 +447,7 @@ mod tests {
            ; run: %test(1, 2)",
         );
 
-        let reconstructed = to_function(trace, &env);
+        let reconstructed = to_function(trace, env);
         let expected = parse(
             "
             function u0:0(i32, i32) {
@@ -367,4 +462,44 @@ mod tests {
             expected.display(None).to_string()
         );
     }
+
+    #[test]
+    fn reconstruct_multiple_ebbs() {
+        let _ = pretty_env_logger::try_init();
+        let (env, trace) = interpret(
+            "
+            function %mul3(i32) {
+            ebb0(v20: i32):
+                trace_start 99
+                v21 = iadd.i32 v20, v20
+                fallthrough ebb1(v20, v21)
+            ebb1(v10: i32, v11: i32):
+                v12 = iadd.i32 v11, v10
+                fallthrough ebb2(v10, v12)
+            ebb2(v0: i32, v1: i32):
+                v2 = iadd.i32 v1, v0
+                trace_end 99
+                return
+            }
+           ; run: %mul3(5)",
+        );
+
+        let reconstructed = to_function(trace, env);
+        let expected = parse(
+            "
+            function u0:0(i32) {
+            ebb0(v1: i32):
+                v0 = iadd.i32 v1, v1
+                v2 = iadd.i32 v0, v1
+                v3 = iadd.i32 v2, v1
+            }",
+        );
+
+        assert_eq!(
+            reconstructed.display(None).to_string(),
+            expected.display(None).to_string()
+        );
+    }
+
+    // TODO add more tests: through function call, through jump, through branch
 }

@@ -2,7 +2,7 @@ use cranelift_codegen::ir::{FuncRef, Inst};
 use cranelift_interpreter::environment::Environment;
 use cranelift_interpreter::runner::FileRunner;
 use cranelift_interpreter::tracing::{
-    to_function, ReconstructedInstruction, Trace, TracedInstruction,
+    FunctionReconstructor, ReconstructedInstruction, Trace, TracedInstruction,
 };
 
 #[test]
@@ -43,7 +43,7 @@ fn build_function_from_trace() {
     let _ = pretty_env_logger::try_init();
 
     let (env, trace) = interpret_add_with_tracing();
-    let function = to_function(trace, &env);
+    let function = FunctionReconstructor::new(&trace, &env).build();
     println!("{:?}", function);
 }
 
