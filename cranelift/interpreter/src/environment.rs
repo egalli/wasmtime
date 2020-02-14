@@ -30,7 +30,7 @@ impl Environment {
     }
 
     /// Retrieve a function's index by name.
-    pub fn index_of(&self, name: &str) -> Option<FuncRef> {
+    pub fn get_func_ref_by_name(&self, name: &str) -> Option<FuncRef> {
         self.function_name_to_index
             .iter()
             .position(|n| n == name)
@@ -45,7 +45,7 @@ impl Environment {
 
     /// Retrieve a function by its name.
     pub fn get_by_name(&self, name: &str) -> Option<&Function> {
-        if let Some(fr) = self.index_of(name) {
+        if let Some(fr) = self.get_func_ref_by_name(name) {
             if let Some(func) = self.get_by_func_ref(fr) {
                 return Some(func);
             }

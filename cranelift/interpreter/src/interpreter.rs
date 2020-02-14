@@ -59,7 +59,7 @@ impl<'a> Interpreter<'a> {
     pub fn call_by_name(&self, func_name: &str, arguments: &[Value]) -> Result<ControlFlow, Trap> {
         let func_ref = self
             .env
-            .index_of(func_name)
+            .get_func_ref_by_name(func_name)
             .ok_or_else(|| Trap::InvalidFunctionName(func_name.to_string()))?;
         self.call_by_index(func_ref, arguments)
     }
@@ -317,7 +317,7 @@ fn value_refs(function: &Function, args: &ValueList) -> Vec<ValueRef> {
 
 /// Return the (external) function name of `func_ref` in a local `function`. Note that this may
 /// be truncated.
-fn function_name_of_func_ref(func_ref: FuncRef, function: &Function) -> String {
+pub fn function_name_of_func_ref(func_ref: FuncRef, function: &Function) -> String {
     function
         .dfg
         .ext_funcs

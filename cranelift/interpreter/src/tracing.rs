@@ -1,6 +1,7 @@
 //! Implements the tracing functionality for the Cranelift interpreter.
 
 use crate::environment::Environment;
+use crate::interpreter::function_name_of_func_ref;
 use cranelift_codegen::ir::{
     AbiParam, Ebb, FuncRef, Function, Inst, InstructionData, Opcode, Value,
 };
@@ -138,6 +139,7 @@ type StackFrame = (FuncRef, Renumberings, CallResults);
 ///
 /// Because of how `Function` tracks its values, we must renumber all of the SSA values in the
 /// instructions it contains. This struct maintains the mapping between old and new SSA values.
+#[derive(Debug)]
 struct Renumberings(HashMap<OldValue, NewValue>);
 
 impl Renumberings {
@@ -249,14 +251,24 @@ impl<'a> FunctionReconstructor<'a> {
         //let old_func = self.old_func();
         let inst_data = self.old_func().dfg[inst].clone();
         match inst_data {
-            InstructionData::Call { args, func_ref, .. } => {
+            InstructionData::Call {
+                args,
+                func_ref: sig_ref,
+                ..
+            } => {
                 // partially fulfill requirement 2
                 let caller_results = self.old_func().dfg.inst_results(inst).to_vec();
                 let caller_args = args.as_slice(&self.old_func().dfg.value_lists);
+                let callee_name = function_name_of_func_ref(sig_ref, &self.old_func());
+                // TODO there must be a better way to do this than string comparison
+                let callee_func_ref = self
+                    .env
+                    .get_func_ref_by_name(&callee_name)
+                    .expect("a function with this name");
                 let callee_func = self
                     .env
-                    .get_by_func_ref(func_ref)
-                    .expect("the called function to exist");
+                    .get_by_func_ref(callee_func_ref)
+                    .expect("a function with this index");
                 let callee_ebb = callee_func
                     .layout
                     .ebbs()
@@ -265,13 +277,25 @@ impl<'a> FunctionReconstructor<'a> {
                 let callee_args = callee_func.dfg.ebb_params(callee_ebb);
                 debug_assert_eq!(caller_args.len(), callee_args.len());
 
+                // TODO deduplicate this with jump
                 let mut local_renumbering: Renumberings = Renumberings::new();
                 for (old_arg, new_arg) in caller_args.iter().zip(callee_args) {
-                    local_renumbering.renumber(*old_arg, *new_arg);
+                    if let Some(renumbered_arg) = self.current_renumbering().get(old_arg) {
+                        local_renumbering.renumber(*new_arg, *renumbered_arg);
+                    } else if let Some(renumbered_arg) = self.inputs.get(old_arg) {
+                        assert_eq!(
+                            self.stack.len(),
+                            1,
+                            "we only need input numberings if we are in the first stack frame"
+                        );
+                        local_renumbering.renumber(*new_arg, *renumbered_arg);
+                    } else {
+                        panic!("don't yet know what to do here");
+                    }
                 }
 
                 self.stack
-                    .push((func_ref, local_renumbering, caller_results));
+                    .push((callee_func_ref, local_renumbering, caller_results));
             }
             InstructionData::Jump {
                 destination, args, ..
@@ -293,7 +317,6 @@ impl<'a> FunctionReconstructor<'a> {
                         new_renumbering.renumber(*new_arg, *renumbered_arg);
                     } else {
                         panic!("don't yet know what to do here");
-                        // local_renumbering.insert(*old_arg, *new_arg);
                     }
                 }
 
@@ -492,6 +515,45 @@ mod tests {
                 v0 = iadd.i32 v1, v1
                 v2 = iadd.i32 v0, v1
                 v3 = iadd.i32 v2, v1
+            }",
+        );
+
+        assert_eq!(
+            reconstructed.display(None).to_string(),
+            expected.display(None).to_string()
+        );
+    }
+
+    #[test]
+    fn reconstruct_jump() {
+        let _ = pretty_env_logger::try_init();
+        let (env, trace) = interpret(
+            "
+            function %mul3(i32) -> i32 {
+            fn0 = %add(i32, i32) -> i32
+            ebb0(v20: i32):
+                trace_start 99
+                v21 = iadd.i32 v20, v20
+                v22 = call fn0(v20, v21)
+                return v22
+            }
+            ; run: %mul3(5)
+            
+            function %add(i32, i32) -> i32 {
+            ebb0(v20: i32, v21: i32):
+                v19 = iadd.i32 v20, v21
+                return v19
+            }
+            ",
+        );
+
+        let reconstructed = to_function(trace, env);
+        let expected = parse(
+            "
+            function u0:0(i32) {
+            ebb0(v1: i32):
+                v0 = iadd.i32 v1, v1
+                v2 = iadd.i32 v1, v0
             }",
         );
 
