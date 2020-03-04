@@ -450,6 +450,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cranelift-interpreter"
+version = "0.1.0"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-entity",
+ "cranelift-frontend",
+ "cranelift-reader",
+ "hashbrown 0.6.3",
+ "log",
+ "pretty_env_logger 0.3.1",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
 name = "cranelift-module"
 version = "0.62.0"
 dependencies = [
@@ -539,6 +554,7 @@ dependencies = [
  "cranelift-faerie",
  "cranelift-filetests",
  "cranelift-frontend",
+ "cranelift-interpreter",
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
