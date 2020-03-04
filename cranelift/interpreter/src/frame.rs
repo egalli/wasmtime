@@ -87,8 +87,8 @@ mod tests {
         let mut func = Function::new();
         let mut context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut func, &mut context);
-        let ebb = builder.create_ebb();
-        builder.switch_to_block(ebb);
+        let block = builder.create_block();
+        builder.switch_to_block(block);
         builder.ins().return_(&[]);
         func
     }

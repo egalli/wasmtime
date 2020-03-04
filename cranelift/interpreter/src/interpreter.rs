@@ -8,7 +8,7 @@ use crate::value::Value;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Imm64;
 use cranelift_codegen::ir::{
-    Ebb, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*,
+    Block, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*,
     Value as ValueRef, ValueList,
 };
 use log::debug;
@@ -18,7 +18,7 @@ use thiserror::Error;
 /// The valid control flow states.
 pub enum ControlFlow {
     Continue,
-    ContinueAt(Ebb, Vec<ValueRef>),
+    ContinueAt(Block, Vec<ValueRef>),
     Return(Vec<Value>),
 }
 
@@ -72,22 +72,26 @@ impl Interpreter {
 
     fn call(&self, function: &Function, arguments: &[Value]) -> Result<ControlFlow, Trap> {
         debug!("Call: {}({:?})", function.name, arguments);
-        let first_ebb = function.layout.ebbs().next().expect("to have a first ebb");
-        let parameters = function.dfg.ebb_params(first_ebb);
+        let first_block = function
+            .layout
+            .blocks()
+            .next()
+            .expect("to have a first block");
+        let parameters = function.dfg.block_params(first_block);
         let mut frame = Frame::new(function).with_parameters(parameters, arguments);
-        let result = self.block(&mut frame, first_ebb);
+        let result = self.block(&mut frame, first_block);
         result
     }
 
-    fn block(&self, frame: &mut Frame, ebb: Ebb) -> Result<ControlFlow, Trap> {
-        debug!("Block: {}", ebb);
-        for inst in frame.function.layout.ebb_insts(ebb) {
+    fn block(&self, frame: &mut Frame, block: Block) -> Result<ControlFlow, Trap> {
+        debug!("Block: {}", block);
+        for inst in frame.function.layout.block_insts(block) {
             match self.inst(frame, inst)? {
                 ControlFlow::Continue => continue,
-                ControlFlow::ContinueAt(ebb, old_names) => {
-                    let new_names = frame.function.dfg.ebb_params(ebb);
+                ControlFlow::ContinueAt(block, old_names) => {
+                    let new_names = frame.function.dfg.block_params(block);
                     frame.rename(&old_names, new_names);
-                    return self.block(frame, ebb); // TODO check that TCO happens
+                    return self.block(frame, block); // TODO check that TCO happens
                 }
                 ControlFlow::Return(rs) => return Ok(ControlFlow::Return(rs)),
             }

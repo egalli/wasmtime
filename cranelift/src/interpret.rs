@@ -72,7 +72,7 @@ mod test {
         let code = String::from(
             "
             function %test() -> b8 {
-            ebb0:
+            block0:
                 nop
                 v1 = bconst.b8 true
                 v2 = iconst.i8 42
