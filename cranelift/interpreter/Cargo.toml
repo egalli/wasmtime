@@ -15,6 +15,8 @@ cranelift-codegen = { path = "../codegen", version = "*", default-features = fal
 cranelift-entity = { path = "../entity", version = "*" }
 cranelift-frontend = { path = "../frontend", version = "*" }
 cranelift-reader = { path = "../reader", version = "*" }
+cranelift-value = { path = "../value", version = "*" }
+cranelift-filetests = { path = "../filetests", version = "*" }
 hashbrown = { version = "0.6", optional = true }
 log = { version = "0.4.6", default-features = false }
 thiserror = "1.0.4"

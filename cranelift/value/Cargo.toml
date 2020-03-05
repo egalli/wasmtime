@@ -1,0 +1,17 @@
+[package]
+name = "cranelift-value"
+version = "0.1.0"
+authors = ["Andrew Brown"]
+description = "Facility for boxing Cranelift IR values"
+repository = "https://github.com/CraneStation/cranelift"
+documentation = "https://cranelift.readthedocs.io/"
+categories = ["no-std"]
+license = "Apache-2.0 WITH LLVM-exception"
+readme = "README.md"
+edition = "2018"
+
+[dependencies]
+
+
+[badges]
+maintenance = { status = "experimental" }

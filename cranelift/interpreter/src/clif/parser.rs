@@ -11,7 +11,7 @@
 //! ```
 
 use crate::clif::lexer::{Lexer, LexerError, Token, TokenKind};
-use crate::value::Value;
+use cranelift_value::Value;
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::str::FromStr;

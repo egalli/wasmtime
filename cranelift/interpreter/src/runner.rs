@@ -4,8 +4,8 @@ use crate::clif::parser::{ClifCommand, Comparison, Invoke, Parse, ParseBuffer, P
 use crate::environment::Environment;
 use crate::interpreter::{ControlFlow, Interpreter, Trap};
 use crate::tracing::Trace;
-use crate::value::Value;
 use cranelift_reader::{parse_test, Comment, ParseError, ParseOptions};
+use cranelift_value::Value;
 use log::debug;
 use std::path::PathBuf;
 use std::{fs, io};
@@ -107,7 +107,7 @@ impl FileRunner {
                 traces.push(trace);
             }
         }
-        
+
         Ok((env, traces))
     }
 

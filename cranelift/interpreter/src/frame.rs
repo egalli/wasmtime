@@ -1,7 +1,8 @@
 //! Implements a call frame (activation record) for the Cranelift interpreter.
 
-use crate::value::Value;
 use cranelift_codegen::ir::{FuncRef, Function, Value as ValueRef};
+use cranelift_entity::EntityList;
+use cranelift_value::Value;
 use std::collections::HashMap;
 
 /// Holds the mutable elements of an interpretation. At some point I thought about using
@@ -50,6 +51,11 @@ impl<'a> Frame<'a> {
     /// Retrieve multiple SSA references; see `get`.
     pub fn get_all(&self, names: &[ValueRef]) -> Vec<Value> {
         names.iter().map(|r| self.get(r)).cloned().collect()
+    }
+
+    /// Retrieve multiple SSA references from an `EntityList`; see `get`.
+    pub fn get_list(&self, names: &EntityList<ValueRef>) -> Vec<Value> {
+        self.get_all(names.as_slice(&self.function.dfg.value_lists))
     }
 
     /// Assign `value` to the SSA reference `name`.

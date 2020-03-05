@@ -13,6 +13,8 @@ use cranelift_codegen::ir::{
     Block, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*,
     Value as ValueRef, ValueList,
 };
+use cranelift_filetests::FunctionRunner;
+use cranelift_value::Value;
 use log::debug;
 use std::ops::{Add, Sub};
 use thiserror::Error;

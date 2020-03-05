@@ -5,6 +5,8 @@ use crate::interpreter::function_name_of_func_ref;
 use cranelift_codegen::ir::{
     AbiParam, Block, FuncRef, Function, Inst, InstructionData, Opcode, Value,
 };
+use cranelift_filetests::{CompiledCode, FunctionRunner};
+use cranelift_value::Value as BoxedValue;
 use log::debug;
 use std::collections::HashMap;
 
