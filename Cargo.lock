@@ -436,6 +436,7 @@ dependencies = [
  "cranelift-native",
  "cranelift-preopt",
  "cranelift-reader",
+ "cranelift-value",
  "file-per-thread-logger",
  "filecheck",
  "gimli",
@@ -462,8 +463,10 @@ version = "0.1.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
+ "cranelift-filetests",
  "cranelift-frontend",
  "cranelift-reader",
+ "cranelift-value",
  "hashbrown 0.6.3",
  "log",
  "pretty_env_logger 0.3.1",
@@ -580,6 +583,10 @@ dependencies = [
  "walkdir",
  "wat",
 ]
+
+[[package]]
+name = "cranelift-value"
+version = "0.1.0"
 
 [[package]]
 name = "cranelift-wasm"
