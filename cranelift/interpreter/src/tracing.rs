@@ -3,7 +3,7 @@
 use crate::environment::Environment;
 use crate::interpreter::function_name_of_func_ref;
 use cranelift_codegen::ir::{
-    AbiParam, Ebb, FuncRef, Function, Inst, InstructionData, Opcode, Value,
+    AbiParam, Block, FuncRef, Function, Inst, InstructionData, Opcode, Value,
 };
 use log::debug;
 use std::collections::HashMap;
@@ -204,8 +204,8 @@ impl<'a> FunctionReconstructor<'a> {
 
         // Add the initial block for the reconstructed trace function (there may be more later to
         // handle guards).
-        let block = new_func.dfg.make_ebb();
-        new_func.layout.append_ebb(block);
+        let block = new_func.dfg.make_block();
+        new_func.layout.append_block(block);
 
         // Set up the stack using the first meta-instruction.
         if let TracedInstruction::StartInFunction(func_ref) = self.trace.observed[0] {
@@ -247,7 +247,7 @@ impl<'a> FunctionReconstructor<'a> {
             .push((func_ref, Renumberings::new(), CallResults::new()));
     }
 
-    fn reconstruct_instruction(&mut self, inst: Inst, new_func: &mut Function, block: Ebb) {
+    fn reconstruct_instruction(&mut self, inst: Inst, new_func: &mut Function, block: Block) {
         //let old_func = self.old_func();
         let inst_data = self.old_func().dfg[inst].clone();
         match inst_data {
@@ -269,12 +269,12 @@ impl<'a> FunctionReconstructor<'a> {
                     .env
                     .get_by_func_ref(callee_func_ref)
                     .expect("a function with this index");
-                let callee_ebb = callee_func
+                let callee_block = callee_func
                     .layout
-                    .ebbs()
+                    .blocks()
                     .next()
-                    .expect("to have a first ebb");
-                let callee_args = callee_func.dfg.ebb_params(callee_ebb);
+                    .expect("to have a first block");
+                let callee_args = callee_func.dfg.block_params(callee_block);
                 debug_assert_eq!(caller_args.len(), callee_args.len());
 
                 // TODO deduplicate this with jump
@@ -306,7 +306,7 @@ impl<'a> FunctionReconstructor<'a> {
                 let (func_ref, old_renumbering, caller_results) =
                     self.stack.pop().expect("to have something on the stack");
                 let caller_args = args.as_slice(&self.func(func_ref).dfg.value_lists);
-                let destination_args = self.func(func_ref).dfg.ebb_params(destination);
+                let destination_args = self.func(func_ref).dfg.block_params(destination);
                 debug_assert_eq!(caller_args.len(), destination_args.len());
 
                 let mut new_renumbering: Renumberings = Renumberings::new();
@@ -358,7 +358,7 @@ impl<'a> FunctionReconstructor<'a> {
                             None => {
                                 // If we have never observed this SSA value, add it as a free input.
                                 let ty = self.old_func().dfg.value_type(old_arg);
-                                let new_arg = new_func.dfg.append_ebb_param(block, ty);
+                                let new_arg = new_func.dfg.append_block_param(block, ty);
                                 self.inputs.renumber(old_arg, new_arg);
                                 new_arg
                             }
@@ -456,12 +456,12 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_single_ebb() {
+    fn reconstruct_single_block() {
         let _ = pretty_env_logger::try_init();
         let (env, trace) = interpret(
             "
             function %test(i32, i32) -> i32 {
-            ebb0(v43: i32, v44: i32):
+            block0(v43: i32, v44: i32):
                 trace_start 99
                 v42 = iadd.i32 v43, v44
                 v45 = isub.i32 v42, v43
@@ -474,7 +474,7 @@ mod tests {
         let expected = parse(
             "
             function u0:0(i32, i32) {
-            ebb0(v1: i32, v2: i32):
+            block0(v1: i32, v2: i32):
                 v0 = iadd.i32 v1, v2
                 v3 = isub.i32 v0, v1
             }",
@@ -487,19 +487,19 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_multiple_ebbs() {
+    fn reconstruct_multiple_blocks() {
         let _ = pretty_env_logger::try_init();
         let (env, trace) = interpret(
             "
             function %mul3(i32) {
-            ebb0(v20: i32):
+            block0(v20: i32):
                 trace_start 99
                 v21 = iadd.i32 v20, v20
-                fallthrough ebb1(v20, v21)
-            ebb1(v10: i32, v11: i32):
+                fallthrough block1(v20, v21)
+            block1(v10: i32, v11: i32):
                 v12 = iadd.i32 v11, v10
-                fallthrough ebb2(v10, v12)
-            ebb2(v0: i32, v1: i32):
+                fallthrough block2(v10, v12)
+            block2(v0: i32, v1: i32):
                 v2 = iadd.i32 v1, v0
                 trace_end 99
                 return
@@ -511,7 +511,7 @@ mod tests {
         let expected = parse(
             "
             function u0:0(i32) {
-            ebb0(v1: i32):
+            block0(v1: i32):
                 v0 = iadd.i32 v1, v1
                 v2 = iadd.i32 v0, v1
                 v3 = iadd.i32 v2, v1
@@ -531,7 +531,7 @@ mod tests {
             "
             function %mul3(i32) -> i32 {
             fn0 = %add(i32, i32) -> i32
-            ebb0(v20: i32):
+            block0(v20: i32):
                 trace_start 99
                 v21 = iadd.i32 v20, v20
                 v22 = call fn0(v20, v21)
@@ -540,7 +540,7 @@ mod tests {
             ; run: %mul3(5)
             
             function %add(i32, i32) -> i32 {
-            ebb0(v20: i32, v21: i32):
+            block0(v20: i32, v21: i32):
                 v19 = iadd.i32 v20, v21
                 return v19
             }
@@ -551,7 +551,7 @@ mod tests {
         let expected = parse(
             "
             function u0:0(i32) {
-            ebb0(v1: i32):
+            block0(v1: i32):
                 v0 = iadd.i32 v1, v1
                 v2 = iadd.i32 v1, v0
             }",
