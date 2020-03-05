@@ -81,6 +81,6 @@ mod test {
             ; run
             ",
         );
-        FileRunner::from_inline_code(code).run().unwrap()
+        FileRunner::from_inline_code(code).run().unwrap();
     }
 }
