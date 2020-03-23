@@ -465,6 +465,7 @@ dependencies = [
  "cranelift-entity",
  "cranelift-filetests",
  "cranelift-frontend",
+ "cranelift-native",
  "cranelift-reader",
  "cranelift-value",
  "hashbrown 0.6.3",

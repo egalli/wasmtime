@@ -14,6 +14,7 @@ edition = "2018"
 cranelift-codegen = { path = "../codegen", version = "*", default-features = false }
 cranelift-entity = { path = "../entity", version = "*" }
 cranelift-frontend = { path = "../frontend", version = "*" }
+cranelift-native = { path = "../native", version = "*" }
 cranelift-reader = { path = "../reader", version = "*" }
 cranelift-value = { path = "../value", version = "*" }
 cranelift-filetests = { path = "../filetests", version = "*" }

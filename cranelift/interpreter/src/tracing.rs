@@ -3,12 +3,25 @@
 use crate::environment::Environment;
 use crate::interpreter::function_name_of_func_ref;
 use cranelift_codegen::ir::{
-    AbiParam, Block, FuncRef, Function, Inst, InstructionData, Opcode, Value,
+    AbiParam, Block, FuncRef, Function, Inst, InstructionData, Opcode, Value, ValueList,
 };
+use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::settings;
 use cranelift_filetests::{CompiledCode, FunctionRunner};
+use cranelift_native::builder as host_isa_builder;
 use cranelift_value::Value as BoxedValue;
 use log::debug;
 use std::collections::HashMap;
+use thiserror::Error;
+
+/// The ways tracing can fail.
+#[derive(Error, Debug)]
+pub enum TraceError {
+    #[error("trace compilation failed: {0}")]
+    CompilationFailed(String),
+    #[error("trace execution failed: {0}")]
+    ExecutionFailed(String),
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TracedInstruction {
@@ -28,23 +41,26 @@ pub enum TracedInstruction {
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Trace {
-    tracing: bool,
+    tracing: Option<i64>,
     observed: Vec<TracedInstruction>,
 }
 
 impl Trace {
-    pub fn start(&mut self, func_ref: FuncRef) {
-        self.tracing = true;
+    pub fn start(&mut self, id: i64, func_ref: FuncRef) {
+        assert!(self.tracing.is_none(), "should not be currently tracing");
+        self.tracing.replace(id);
         self.observed
             .push(TracedInstruction::StartInFunction(func_ref))
     }
 
-    pub fn end(&mut self) {
-        self.tracing = false
+    pub fn end(&mut self) -> i64 {
+        self.tracing
+            .take()
+            .expect("tracing should have been started")
     }
 
     pub fn observe(&mut self, observed: TracedInstruction) {
-        if self.tracing {
+        if self.tracing.is_some() {
             self.observed.push(observed)
         }
     }
@@ -204,6 +220,12 @@ impl<'a> FunctionReconstructor<'a> {
     pub fn build(&mut self) -> Function {
         let mut new_func = Function::new();
 
+        // Use the host system's calling convention.
+        let flags = settings::Flags::new(settings::builder());
+        let builder = host_isa_builder().expect("Unable to build a TargetIsa for the current host");
+        let isa = builder.finish(flags);
+        new_func.signature.call_conv = isa.default_call_conv();
+
         // Add the initial block for the reconstructed trace function (there may be more later to
         // handle guards).
         let block = new_func.dfg.make_block();
@@ -233,6 +255,13 @@ impl<'a> FunctionReconstructor<'a> {
                 TracedInstruction::Guard(_) => { /* TODO */ }
             }
         }
+
+        // Return from the function. TODO need to figure out which values to return if necessary
+        let return_inst = new_func.dfg.make_inst(InstructionData::MultiAry {
+            opcode: Opcode::Return,
+            args: ValueList::new(),
+        });
+        new_func.layout.append_inst(return_inst, block);
 
         // Add the discovered trace inputs (free SSA values) to the function signature.
         for (_, new_arg) in self.inputs.iter() {
@@ -430,6 +459,35 @@ impl<'a> FunctionReconstructor<'a> {
     }
 }
 
+/// Find the host machine's default calling convention.
+fn host_calling_convention() -> CallConv {
+    let flags = settings::Flags::new(settings::builder());
+    let builder = host_isa_builder().expect("Unable to build a TargetIsa for the current host");
+    let isa = builder.finish(flags);
+    isa.default_call_conv()
+}
+
+#[derive(Default)]
+pub struct TraceStore(HashMap<i64, CompiledCode>);
+
+impl TraceStore {
+    /// Check if the trace exists in the environment.
+    pub fn contains(&self, id: i64) -> bool {
+        self.0.contains_key(&id)
+    }
+
+    /// Add a trace.
+    pub fn insert(&mut self, id: i64, code: CompiledCode) {
+        self.0.insert(id, code);
+    }
+
+    /// Execute the compiled trace.
+    pub fn execute(&self, id: i64, args: &[BoxedValue]) -> Result<BoxedValue, TraceError> {
+        let code = self.0.get(&id).expect("trace must exist");
+        FunctionRunner::execute(code.as_slice(), args).map_err(|e| TraceError::ExecutionFailed(e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,7 +508,9 @@ mod tests {
     fn parse(clif: &str) -> Function {
         let test_file = parse_test(clif, ParseOptions::default()).unwrap();
         assert_eq!(1, test_file.functions.len());
-        test_file.functions[0].0.clone() // the first function
+        let mut function = test_file.functions[0].0.clone(); // the first function
+        function.signature.call_conv = host_calling_convention();
+        function
     }
 
     fn to_function(trace: Trace, environment: Environment) -> Function {
@@ -479,6 +539,7 @@ mod tests {
             block0(v1: i32, v2: i32):
                 v0 = iadd.i32 v1, v2
                 v3 = isub.i32 v0, v1
+                return
             }",
         );
 
@@ -517,6 +578,7 @@ mod tests {
                 v0 = iadd.i32 v1, v1
                 v2 = iadd.i32 v0, v1
                 v3 = iadd.i32 v2, v1
+                return
             }",
         );
 
@@ -556,6 +618,7 @@ mod tests {
             block0(v1: i32):
                 v0 = iadd.i32 v1, v1
                 v2 = iadd.i32 v1, v0
+                return
             }",
         );
 

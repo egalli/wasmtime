@@ -4,8 +4,7 @@
 
 use crate::environment::Environment;
 use crate::frame::Frame;
-use crate::tracing::{Trace, TracedInstruction};
-use crate::value::Value;
+use crate::tracing::{FunctionReconstructor, Trace, TraceError, TraceStore, TracedInstruction};
 use core::cell::RefCell;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Imm64;
@@ -41,6 +40,8 @@ pub enum Trap {
     InvalidFunctionReference(FuncRef),
     #[error("invalid function name: {0}")]
     InvalidFunctionName(String),
+    #[error("trace failure")]
+    TraceError(#[from] TraceError),
 }
 
 /// The Cranelift interpreter; it contains immutable elements such as the function environment and
@@ -48,6 +49,7 @@ pub enum Trap {
 pub struct Interpreter<'a> {
     pub env: &'a Environment,
     pub trace: RefCell<Trace>,
+    pub traces: RefCell<TraceStore>,
 }
 
 impl<'a> Interpreter<'a> {
@@ -55,6 +57,7 @@ impl<'a> Interpreter<'a> {
         Self {
             env,
             trace: RefCell::new(Trace::default()),
+            traces: RefCell::new(TraceStore::default()),
         }
     }
 
@@ -260,19 +263,22 @@ impl<'a> Interpreter<'a> {
             },
             MultiAry { opcode, args } => match opcode {
                 Return => {
-                    let rs: Vec<Value> = args
-                        .as_slice(&frame.function.dfg.value_lists)
-                        .iter()
-                        .map(|r| frame.get(r).clone())
-                        .collect();
+                    let rs = frame.get_list(args);
                     Ok(ControlFlow::Return(rs))
                 }
                 _ => unimplemented!(),
             },
-            MultiAryImm { opcode, .. } => match opcode {
+            MultiAryImm { opcode, imm, args } => match opcode {
                 TraceStart => {
-                    // TODO ensure we aren't already tracing, use ID
-                    self.trace.borrow_mut().start(frame.func_ref);
+                    let id: i64 = (*imm).into();
+                    if self.traces.borrow().contains(id) {
+                        let args = frame.get_list(args);
+                        let _results = self.traces.borrow().execute(id, &args[..]);
+                    // TODO add trace results to the environment
+                    } else {
+                        self.trace.borrow_mut().start(id, frame.func_ref);
+                    }
+
                     Ok(Continue)
                 }
                 _ => unimplemented!(),
@@ -288,9 +294,17 @@ impl<'a> Interpreter<'a> {
                     Ok(Continue)
                 }
                 TraceEnd => {
-                    // TODO ensure start and end IDs match
-                    self.trace.borrow_mut().end();
-                    self.trace.borrow_mut().remove_last();
+                    let id = self.trace.borrow_mut().end();
+                    self.trace.borrow_mut().remove_last(); // remove the `TraceEnd`
+                    let trace = self.trace.borrow();
+                    let mut reconstructor = FunctionReconstructor::new(&trace, self.env);
+                    let reconstructed_function = reconstructor.build();
+                    let runner = FunctionRunner::with_default_host_isa(reconstructed_function);
+                    // TODO fix this:
+                    let compiled_code = runner
+                        .compile()
+                        .map_err(|e| TraceError::CompilationFailed(e))?;
+                    self.traces.borrow_mut().insert(id, compiled_code);
                     Ok(Continue)
                 }
                 _ => unimplemented!(),
