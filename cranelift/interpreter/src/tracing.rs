@@ -1,4 +1,26 @@
 //! Implements the tracing functionality for the Cranelift interpreter.
+//!
+//! This tracing module adds the ability to trace sequences of instructions interpreted by
+//! [Interpreter], an interpreter of Cranelift IR. The trace can be compiled and run in lieu of the
+//! original Cranelift IR; (TODO) this is currently not completely true due to missing instruction
+//! implementations and no memory support, but is the eventual goal.
+//!
+//! Using this tracing currently looks like the following:
+//! - Annotate Cranelift with the new `trace_start` and `trace_end` instructions; `trace_start` has
+//!   an ID field (stored as an immediate, `imm`) to distinguish between traces.
+//! - Interpret the Cranelift IR with the [Interpreter] (e.g. see `test/filetests.rs`).
+//! - When the [Interpreter] encounters a `trace_start` instruction (and no compiled trace for its
+//!   ID), tracing is turned on. This state change is implemented in the `TraceStart` arm of
+//!   [Interpreter::inst].
+//! - For each subsequent instruction, the [Interpreter] appends the instruction to a `Trace`.
+//! - When a `trace_end` is interpreted (see `TraceEnd` in [Interpreter::inst]), the trace is:
+//!   > reconstructed by `FunctionReconstructor`: this renumbers all SSA values and eliminates
+//!     jumps and function calls.
+//!   > compiled by the Cranelift compiler
+//!   > added to the `TraceStore` for the given trace ID
+//! - The [Interpreter] continues interpreting the instructions after the `trace_end`.
+//! - If the [Interpreter] again interprets the same `trace_start id` pair, it now uses the
+//!   compiled version of the trace it extracts from the `TraceStore`.
 
 use crate::environment::Environment;
 use crate::interpreter::function_name_of_func_ref;

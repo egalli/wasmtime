@@ -300,7 +300,6 @@ impl<'a> Interpreter<'a> {
                     let mut reconstructor = FunctionReconstructor::new(&trace, self.env);
                     let reconstructed_function = reconstructor.build();
                     let runner = FunctionRunner::with_default_host_isa(reconstructed_function);
-                    // TODO fix this:
                     let compiled_code = runner
                         .compile()
                         .map_err(|e| TraceError::CompilationFailed(e))?;
