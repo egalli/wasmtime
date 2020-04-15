@@ -12,7 +12,7 @@ use std::fmt::{self, Display, Formatter};
 
 /// A run command appearing in a test file.
 ///
-/// For parsing, see [Parser::parse_run_command].
+/// For parsing, see [parse_run_command](super::parser::parse_run_command).
 #[derive(PartialEq, Debug)]
 pub enum RunCommand {
     /// Invoke a function and print its result.
@@ -104,8 +104,8 @@ impl Display for Invocation {
     }
 }
 
-/// Represent a data value. Where [Value] is an SSA reference, [DataValue] is the type + value
-/// that would be referred to by a [Value].
+/// Represent a data value. Where [Value](ir::Value) is an SSA reference, [DataValue] is the type +
+/// value that would be referred to by a [Value](ir::Value).
 #[allow(missing_docs)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataValue {
