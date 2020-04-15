@@ -7,8 +7,8 @@
 //! - `; run: %fn(42, 4.2) == false`: this syntax specifies the parameters and return values.
 
 use cranelift_codegen::ir::immediates::{Ieee32, Ieee64};
-use cranelift_codegen::ir::ConstantData;
-use std::fmt::{Display, Formatter, Result};
+use cranelift_codegen::ir::{self, ConstantData, Type};
+use std::fmt::{self, Display, Formatter};
 
 /// A run command appearing in a test file.
 ///
@@ -21,8 +21,48 @@ pub enum RunCommand {
     Run(Invocation, Comparison, Vec<DataValue>),
 }
 
+impl RunCommand {
+    /// Trim leading spaces and comment chars (i.e. ";") from a string.
+    pub fn trim_comment_chars(comment: &str) -> &str {
+        comment.trim_start_matches(|c| c == ' ' || c == ';')
+    }
+
+    /// Check if a CLIF comment is potentially parseable as a [RunCommand].
+    pub fn is_potential_run_command(comment: &str) -> bool {
+        let trimmed = Self::trim_comment_chars(comment);
+        trimmed.starts_with("run") || trimmed.starts_with("print")
+    }
+
+    /// Run the [RunCommand]:
+    ///  - for [RunCommand::Print], print the returned values from invoking the function.
+    ///  - for [RunCommand::Run], compare the returned values from the invoked function and
+    ///    return an `Err` with a descriptive string if the comparison fails.
+    pub fn run<F>(&self, invoke_fn: F) -> Result<(), String>
+    where
+        F: FnOnce(&[DataValue]) -> Vec<DataValue>,
+    {
+        match self {
+            RunCommand::Print(invoke) => {
+                let actual = invoke_fn(&invoke.args);
+                println!("{:?} -> {:?}", invoke, actual)
+            }
+            RunCommand::Run(invoke, compare, expected) => {
+                let actual = invoke_fn(&invoke.args);
+                let matched = match compare {
+                    Comparison::Equals => *expected == actual,
+                    Comparison::NotEquals => *expected != actual,
+                };
+                if !matched {
+                    return Err(format!("Failed test: {:?}, actual: {:?}", self, actual));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Display for RunCommand {
-    fn fmt(&self, f: &mut Formatter) -> Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             RunCommand::Print(invocation) => write!(f, "print: {}", invocation),
             RunCommand::Run(invocation, comparison, expected) => {
@@ -57,7 +97,7 @@ impl Invocation {
 }
 
 impl Display for Invocation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "%{}(", self.func)?;
         write_data_value_list(f, &self.args)?;
         write!(f, ")")
@@ -77,6 +117,22 @@ pub enum DataValue {
     F32(f32),
     F64(f64),
     V128([u8; 16]),
+}
+
+impl DataValue {
+    /// Return the Cranelift IR [Type] for this [DataValue].
+    pub fn ty(&self) -> Type {
+        match self {
+            DataValue::B(_) => ir::types::B8,
+            DataValue::I8(_) => ir::types::I8,
+            DataValue::I16(_) => ir::types::I16,
+            DataValue::I32(_) => ir::types::I32,
+            DataValue::I64(_) => ir::types::I64,
+            DataValue::F32(_) => ir::types::F32,
+            DataValue::F64(_) => ir::types::F64,
+            DataValue::V128(_) => ir::types::I8X16,
+        }
+    }
 }
 
 /// Helper for creating [From] implementations for [DataValue]
@@ -99,7 +155,7 @@ from_data!(f64, F64);
 from_data!([u8; 16], V128);
 
 impl Display for DataValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             DataValue::B(dv) => write!(f, "{}", dv),
             DataValue::I8(dv) => write!(f, "{}", dv),
@@ -116,7 +172,7 @@ impl Display for DataValue {
 }
 
 /// Helper function for displaying `Vec<DataValue>`.
-fn write_data_value_list(f: &mut Formatter<'_>, list: &[DataValue]) -> Result {
+fn write_data_value_list(f: &mut Formatter<'_>, list: &[DataValue]) -> fmt::Result {
     match list.len() {
         0 => Ok(()),
         1 => write!(f, "{}", list[0]),
@@ -139,10 +195,33 @@ pub enum Comparison {
 }
 
 impl Display for Comparison {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Comparison::Equals => write!(f, "=="),
             Comparison::NotEquals => write!(f, "!="),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn trim_comments() {
+        assert_eq!(RunCommand::trim_comment_chars(""), "");
+        assert_eq!(RunCommand::trim_comment_chars("abc"), "abc");
+        assert_eq!(RunCommand::trim_comment_chars("  abc"), "abc");
+        assert_eq!(RunCommand::trim_comment_chars(" ; abc"), "abc");
+        assert_eq!(RunCommand::trim_comment_chars(" ; ; abc"), "abc");
+    }
+
+    #[test]
+    fn is_potential_run_command() {
+        assert_eq!(RunCommand::is_potential_run_command(""), false);
+        assert_eq!(RunCommand::is_potential_run_command(";; ..."), false);
+        assert_eq!(RunCommand::is_potential_run_command(";; ... run "), false);
+        assert_eq!(RunCommand::is_potential_run_command(";; print "), true);
+        assert_eq!(RunCommand::is_potential_run_command(" ; run: ... "), true);
     }
 }

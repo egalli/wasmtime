@@ -2,12 +2,12 @@
 //!
 //! The `run` test command compiles each function on the host machine and executes it
 
-use crate::function_runner::FunctionRunner;
+use crate::function_runner::SingleFunctionCompiler;
 use crate::subtest::{Context, SubTest, SubtestResult};
 use cranelift_codegen;
 use cranelift_codegen::ir;
-use cranelift_reader::parse_run_command;
 use cranelift_reader::TestCommand;
+use cranelift_reader::{parse_run_command, RunCommand};
 use log::trace;
 use std::borrow::Cow;
 
@@ -36,17 +36,18 @@ impl SubTest for TestRun {
     }
 
     fn run(&self, func: Cow<ir::Function>, context: &Context) -> SubtestResult<()> {
+        let mut compiler = SingleFunctionCompiler::with_host_isa(context.flags.clone());
         for comment in context.details.comments.iter() {
-            if comment.text.contains("run") {
-                let trimmed_comment = comment.text.trim_start_matches(|c| c == ' ' || c == ';');
-                let command = parse_run_command(trimmed_comment, &func.signature)
-                    .map_err(|e| format!("{}", e))?;
+            if RunCommand::is_potential_run_command(comment.text) {
+                let trimmed = RunCommand::trim_comment_chars(comment.text);
+                let command =
+                    parse_run_command(trimmed, &func.signature).map_err(|e| e.to_string())?;
                 trace!("Parsed run command: {}", command);
-                // TODO in following changes we will use the parsed command to alter FunctionRunner's behavior.
 
-                let runner =
-                    FunctionRunner::with_host_isa(func.clone().into_owned(), context.flags.clone());
-                runner.run()?
+                let compiled_fn = compiler
+                    .compile(func.clone().into_owned())
+                    .map_err(|e| format!("{}", e))?; // TODO avoid clone
+                command.run(|args| compiled_fn.call(args))?;
             }
         }
         Ok(())
