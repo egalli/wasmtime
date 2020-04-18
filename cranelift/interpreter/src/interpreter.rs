@@ -4,13 +4,14 @@
 
 use crate::environment::Environment;
 use crate::frame::Frame;
-use crate::value::Value;
+use crate::interpreter::Trap::InvalidType;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Imm64;
 use cranelift_codegen::ir::{
-    Block, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*,
+    Block, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*, Type,
     Value as ValueRef, ValueList,
 };
+use cranelift_reader::DataValue;
 use log::debug;
 use std::ops::{Add, Sub};
 use thiserror::Error;
@@ -19,7 +20,7 @@ use thiserror::Error;
 pub enum ControlFlow {
     Continue,
     ContinueAt(Block, Vec<ValueRef>),
-    Return(Vec<Value>),
+    Return(Vec<DataValue>),
 }
 
 /// The ways interpretation can fail.
@@ -51,7 +52,11 @@ impl Interpreter {
         Self { env }
     }
 
-    pub fn call_by_name(&self, func_name: &str, arguments: &[Value]) -> Result<ControlFlow, Trap> {
+    pub fn call_by_name(
+        &self,
+        func_name: &str,
+        arguments: &[DataValue],
+    ) -> Result<ControlFlow, Trap> {
         let func_ref = self
             .env
             .index_of(func_name)
@@ -62,7 +67,7 @@ impl Interpreter {
     pub fn call_by_index(
         &self,
         func_ref: FuncRef,
-        arguments: &[Value],
+        arguments: &[DataValue],
     ) -> Result<ControlFlow, Trap> {
         match self.env.get_by_func_ref(func_ref) {
             None => Err(Trap::InvalidFunctionReference(func_ref)),
@@ -70,7 +75,7 @@ impl Interpreter {
         }
     }
 
-    fn call(&self, function: &Function, arguments: &[Value]) -> Result<ControlFlow, Trap> {
+    fn call(&self, function: &Function, arguments: &[DataValue]) -> Result<ControlFlow, Trap> {
         debug!("Call: {}({:?})", function.name, arguments);
         let first_block = function
             .layout
@@ -79,8 +84,7 @@ impl Interpreter {
             .expect("to have a first block");
         let parameters = function.dfg.block_params(first_block);
         let mut frame = Frame::new(function).with_parameters(parameters, arguments);
-        let result = self.block(&mut frame, first_block);
-        result
+        self.block(&mut frame, first_block)
     }
 
     fn block(&self, frame: &mut Frame, block: Block) -> Result<ControlFlow, Trap> {
@@ -102,7 +106,7 @@ impl Interpreter {
     fn binary(
         &self,
         frame: &mut Frame,
-        op: fn(Value, Value) -> Value,
+        op: fn(DataValue, DataValue) -> DataValue,
         a: ValueRef,
         b: ValueRef,
         r: ValueRef,
@@ -117,9 +121,9 @@ impl Interpreter {
     fn binary_imm(
         &self,
         frame: &mut Frame,
-        op: fn(Value, Value) -> Value,
+        op: fn(DataValue, DataValue) -> DataValue,
         a: ValueRef,
-        b: Value,
+        b: DataValue,
         r: ValueRef,
     ) {
         let a = frame.get(&a);
@@ -128,11 +132,12 @@ impl Interpreter {
     }
 
     fn iconst(&self, frame: &mut Frame, imm: Imm64, r: ValueRef) {
-        frame.set(r, Value::Int(imm.into()));
+        let imm_value = cast(imm, type_of(r, frame.function)).expect("an integer");
+        frame.set(r, imm_value);
     }
 
     fn bconst(&self, frame: &mut Frame, imm: bool, r: ValueRef) {
-        frame.set(r, Value::Bool(imm));
+        frame.set(r, DataValue::B(imm));
     }
 
     // TODO add load/store
@@ -154,7 +159,7 @@ impl Interpreter {
             BinaryImm { opcode, arg, imm } => match opcode {
                 IrsubImm => {
                     let res = first_result(frame.function, inst);
-                    let imm = Value::Int((*imm).into());
+                    let imm = DataValue::from((*imm).into());
                     self.binary_imm(frame, Sub::sub, *arg, imm, res);
                     Ok(Continue)
                 }
@@ -169,9 +174,17 @@ impl Interpreter {
                     let mut args = value_refs(frame.function, args);
                     let first = args.remove(0);
                     match frame.get(&first) {
-                        Value::Bool(true) => Ok(ContinueAt(*destination, args)),
-                        Value::Bool(false) => Ok(Continue),
-                        _ => Err(Trap::InvalidType("bool".to_string(), args[0])),
+                        DataValue::B(false)
+                        | DataValue::I8(0)
+                        | DataValue::I16(0)
+                        | DataValue::I32(0)
+                        | DataValue::I64(0) => Ok(Continue),
+                        DataValue::B(true)
+                        | DataValue::I8(_)
+                        | DataValue::I16(_)
+                        | DataValue::I32(_)
+                        | DataValue::I64(_) => Ok(ContinueAt(*destination, args)),
+                        _ => Err(Trap::InvalidType("boolean or integer".to_string(), args[0])),
                     }
                 }
                 _ => unimplemented!(),
@@ -222,25 +235,29 @@ impl Interpreter {
                 imm,
             } => match opcode {
                 IcmpImm => {
-                    let result = if let Value::Int(arg_value) = *frame.get(arg) {
-                        let imm_value: i64 = (*imm).into();
-                        match cond {
-                            IntCC::UnsignedLessThanOrEqual => arg_value <= imm_value,
-                            IntCC::Equal => arg_value == imm_value,
-                            _ => unimplemented!(),
-                        }
-                    } else {
-                        return Err(Trap::InvalidType("int".to_string(), *arg));
+                    let arg_value = match *frame.get(arg) {
+                        // TODO implement TryInto for DataValue
+                        DataValue::I8(i)
+                        | DataValue::I16(i)
+                        | DataValue::I32(i)
+                        | DataValue::I64(i) => Ok(i as u64),
+                        _ => Err(InvalidType("integer".to_string(), arg)),
+                    }?;
+                    let imm_value = (*imm).into();
+                    let result = match cond {
+                        IntCC::UnsignedLessThanOrEqual => arg_value <= imm_value,
+                        IntCC::Equal => arg_value == imm_value,
+                        _ => unimplemented!(),
                     };
                     let res = first_result(frame.function, inst);
-                    frame.set(res, Value::Bool(result));
+                    frame.set(res, DataValue::B(result));
                     Ok(Continue)
                 }
                 _ => unimplemented!(),
             },
             MultiAry { opcode, args } => match opcode {
                 Return => {
-                    let rs: Vec<Value> = args
+                    let rs: Vec<DataValue> = args
                         .as_slice(&frame.function.dfg.value_lists)
                         .iter()
                         .map(|r| frame.get(r).clone())
@@ -275,16 +292,27 @@ impl Interpreter {
     }
 }
 
+/// Return the first result of an instruction.
+///
+/// This helper cushions the interpreter from changes to the [Function] API.
+#[inline]
 fn first_result(function: &Function, inst: Inst) -> ValueRef {
     function.dfg.first_result(inst)
 }
 
+/// Return a list of IR values as a vector.
+///
+/// This helper cushions the interpreter from changes to the [Function] API.
+#[inline]
 fn value_refs(function: &Function, args: &ValueList) -> Vec<ValueRef> {
     args.as_slice(&function.dfg.value_lists).to_vec()
 }
 
 /// Return the (external) function name of `func_ref` in a local `function`. Note that this may
 /// be truncated.
+///
+/// This helper cushions the interpreter from changes to the [Function] API.
+#[inline]
 fn function_name_of_func_ref(func_ref: FuncRef, function: &Function) -> String {
     function
         .dfg
@@ -293,6 +321,26 @@ fn function_name_of_func_ref(func_ref: FuncRef, function: &Function) -> String {
         .expect("function to exist")
         .name
         .to_string()
+}
+
+/// Cast an immediate integer to its correct [DataValue] representation.
+///
+/// TODO move to `impl DataValue`; parameterize on other input types? e.g. TryProm
+#[inline]
+fn cast(input: Imm64, ty: Type) -> Result<DataValue, Trap> {
+    match ty {
+        I8 => Ok(DataValue::I8(input.bits() as i8)),
+        I16 => Ok(DataValue::I16(input.bits() as i16)),
+        I32 => Ok(DataValue::I32(input.bits() as i32)),
+        I64 => Ok(DataValue::I64(input.bits() as i64)),
+        _ => unimplemented!(), // Err(Trap::InvalidType("integer".to_string())) // TO
+    }
+}
+
+/// Helper for calculating the type of an IR value.
+#[inline]
+fn type_of(value: ValueRef, function: &Function) -> Type {
+    function.dfg.value_type(value)
 }
 
 #[cfg(test)]

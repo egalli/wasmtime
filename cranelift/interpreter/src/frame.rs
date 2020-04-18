@@ -1,7 +1,7 @@
 //! Implements a call frame (activation record) for the Cranelift interpreter.
 
-use crate::value::Value;
 use cranelift_codegen::ir::{Function, Value as ValueRef};
+use cranelift_reader::DataValue;
 use std::collections::HashMap;
 
 /// Holds the mutable elements of an interpretation. At some point I thought about using
@@ -14,7 +14,7 @@ pub struct Frame<'a> {
     /// The currently executing function.
     pub function: &'a Function,
     /// The current mapping of SSA value-references to their actual values.
-    registers: HashMap<ValueRef, Value>,
+    registers: HashMap<ValueRef, DataValue>,
 }
 
 impl<'a> Frame<'a> {
@@ -28,7 +28,7 @@ impl<'a> Frame<'a> {
         }
     }
 
-    pub fn with_parameters(mut self, parameters: &[ValueRef], values: &[Value]) -> Self {
+    pub fn with_parameters(mut self, parameters: &[ValueRef], values: &[DataValue]) -> Self {
         for (n, v) in parameters.iter().zip(values) {
             self.registers.insert(*n, v.clone());
         }
@@ -37,25 +37,25 @@ impl<'a> Frame<'a> {
 
     /// Retrieve the actual value associated with an SSA reference.
     #[inline]
-    pub fn get(&self, name: &ValueRef) -> &Value {
+    pub fn get(&self, name: &ValueRef) -> &DataValue {
         self.registers
             .get(name)
             .unwrap_or_else(|| panic!("unknown value: {}", name))
     }
 
     /// Retrieve multiple SSA references; see `get`.
-    pub fn get_all(&self, names: &[ValueRef]) -> Vec<Value> {
+    pub fn get_all(&self, names: &[ValueRef]) -> Vec<DataValue> {
         names.iter().map(|r| self.get(r)).cloned().collect()
     }
 
     /// Assign `value` to the SSA reference `name`.
     #[inline]
-    pub fn set(&mut self, name: ValueRef, value: Value) -> Option<Value> {
+    pub fn set(&mut self, name: ValueRef, value: DataValue) -> Option<DataValue> {
         self.registers.insert(name, value)
     }
 
     /// Assign to multiple SSA references; see `set`.
-    pub fn set_all(&mut self, names: &[ValueRef], values: Vec<Value>) {
+    pub fn set_all(&mut self, names: &[ValueRef], values: Vec<DataValue>) {
         assert_eq!(names.len(), values.len());
         for (n, v) in names.iter().zip(values) {
             self.set(*n, v);
@@ -81,6 +81,7 @@ mod tests {
     use super::*;
     use cranelift_codegen::ir::InstBuilder;
     use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+    use cranelift_reader::DataValue;
 
     /// Build an empty function with a single return.
     fn empty_function() -> Function {
@@ -106,7 +107,7 @@ mod tests {
         let mut frame = Frame::new(&func);
 
         let a = ValueRef::with_number(1).unwrap();
-        let fortytwo = Value::Int(42);
+        let fortytwo = DataValue::I32(42);
         frame.set(a, fortytwo.clone());
         assert_eq!(frame.get(&a), &fortytwo);
     }
