@@ -1,7 +1,7 @@
 [package]
 name = "cranelift-interpreter"
 version = "0.1.0"
-authors = ["Andrew Brown"]
+authors = ["The Cranelift Project Developers"]
 description = "Interpret Cranelift IR"
 repository = "https://github.com/CraneStation/cranelift"
 documentation = "https://cranelift.readthedocs.io/"
@@ -14,11 +14,11 @@ edition = "2018"
 cranelift-codegen = { path = "../codegen", version = "*", default-features = false }
 cranelift-entity = { path = "../entity", version = "*" }
 cranelift-reader = { path = "../reader", version = "*" }
-hashbrown = { version = "0.6", optional = true }
-log = { version = "0.4.6", default-features = false }
-thiserror = "1.0.4"
-walkdir = "2.2"
-pretty_env_logger = "0.3.1"
+hashbrown = { version = "0.7.1", optional = true }
+log = { version = "0.4.8", default-features = false }
+thiserror = "1.0.15"
+walkdir = "2.3.1"
+pretty_env_logger = "0.4.0"
 
 [dev-dependencies]
 cranelift-frontend = { path = "../frontend", version = "*" }

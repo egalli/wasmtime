@@ -457,9 +457,9 @@ dependencies = [
  "cranelift-entity",
  "cranelift-frontend",
  "cranelift-reader",
- "hashbrown 0.6.3",
+ "hashbrown 0.7.1",
  "log",
- "pretty_env_logger 0.3.1",
+ "pretty_env_logger",
  "thiserror",
  "walkdir",
 ]
