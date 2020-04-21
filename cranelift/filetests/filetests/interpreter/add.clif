@@ -1,3 +1,5 @@
+test interpret
+
 function %add() -> i32 {
 block0:
     v0 = iconst.i32 40
@@ -8,4 +10,4 @@ block0:
 block1(v3: i32):
     return v3
 }
-; test: %add() == 42
+; run: %add() == 42

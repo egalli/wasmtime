@@ -11,7 +11,7 @@ use cranelift_codegen::ir::{
     Block, FuncRef, Function, Inst, InstructionData, InstructionData::*, Opcode, Opcode::*, Type,
     Value as ValueRef, ValueList,
 };
-use cranelift_reader::DataValue;
+use cranelift_reader::{DataValue, DataValueCastFailure};
 use log::debug;
 use std::ops::{Add, Sub};
 use thiserror::Error;
@@ -30,6 +30,10 @@ pub enum Trap {
     Unknown,
     #[error("invalid type for {1}: expected {0}")]
     InvalidType(String, ValueRef),
+    #[error("invalid cast")]
+    InvalidCast(#[from] DataValueCastFailure),
+    #[error("the instruction is not implemented (perhaps for the given types): {0}")]
+    Unsupported(Inst),
     #[error("reached an unreachable statement")]
     Unreachable,
     #[error("invalid control flow: {0}")]
@@ -45,6 +49,16 @@ pub enum Trap {
 #[derive(Default)]
 pub struct Interpreter {
     pub env: Environment,
+}
+
+/// Helper for more concise matching.
+macro_rules! binary_op {
+    ( $op:path[$arg1:ident, $arg2:ident]; [ $( $data_value_ty:ident ),* ]; $inst:ident ) => {
+        match ($arg1, $arg2) {
+            $( (DataValue::$data_value_ty(a), DataValue::$data_value_ty(b)) => { Ok(DataValue::$data_value_ty($op(a, b))) } )*
+            _ => Err(Trap::Unsupported($inst)),
+        }
+    };
 }
 
 impl Interpreter {
@@ -103,36 +117,9 @@ impl Interpreter {
         Err(Trap::Unreachable)
     }
 
-    fn binary(
-        &self,
-        frame: &mut Frame,
-        op: fn(DataValue, DataValue) -> DataValue,
-        a: ValueRef,
-        b: ValueRef,
-        r: ValueRef,
-    ) {
-        let a = frame.get(&a);
-        let b = frame.get(&b);
-        let c = op(a.clone(), b.clone());
-        frame.set(r, c);
-    }
-
-    // TODO refactor to only one `binary` method
-    fn binary_imm(
-        &self,
-        frame: &mut Frame,
-        op: fn(DataValue, DataValue) -> DataValue,
-        a: ValueRef,
-        b: DataValue,
-        r: ValueRef,
-    ) {
-        let a = frame.get(&a);
-        let c = op(a.clone(), b);
-        frame.set(r, c);
-    }
-
     fn iconst(&self, frame: &mut Frame, imm: Imm64, r: ValueRef) {
-        let imm_value = cast(imm, type_of(r, frame.function)).expect("an integer");
+        let imm_value = DataValue::from_integer(imm, type_of(r, frame.function))
+            .expect("an integer data value");
         frame.set(r, imm_value);
     }
 
@@ -147,24 +134,30 @@ impl Interpreter {
 
         let data = &frame.function.dfg[inst];
         match data {
-            Binary { opcode, args } => match opcode {
-                Iadd => {
-                    // TODO trap if arguments are of the wrong type; here and below
-                    let res = first_result(frame.function, inst);
-                    self.binary(frame, Add::add, args[0], args[1], res);
-                    Ok(Continue)
-                }
-                _ => unimplemented!(),
-            },
-            BinaryImm { opcode, arg, imm } => match opcode {
-                IrsubImm => {
-                    let res = first_result(frame.function, inst);
-                    let imm = DataValue::from((*imm).into());
-                    self.binary_imm(frame, Sub::sub, *arg, imm, res);
-                    Ok(Continue)
-                }
-                _ => unimplemented!(),
-            },
+            Binary { opcode, args } => {
+                let arg1 = frame.get(&args[0]);
+                let arg2 = frame.get(&args[1]);
+                let result = match opcode {
+                    Iadd => binary_op!(Add::add[arg1, arg2]; [I8, I16, I32, I64, F32, F64]; inst),
+                    Isub => binary_op!(Sub::sub[arg1, arg2]; [I8, I16, I32, I64, F32, F64]; inst),
+                    _ => unimplemented!(),
+                }?;
+                frame.set(first_result(frame.function, inst), result);
+                Ok(Continue)
+            }
+
+            BinaryImm { opcode, arg, imm } => {
+                let imm = DataValue::from_integer(*imm, type_of(*arg, frame.function))?;
+                let arg = frame.get(&arg);
+                let result = match opcode {
+                    IaddImm => binary_op!(Add::add[arg, imm]; [I8, I16, I32, I64, F32, F64]; inst),
+                    IrsubImm => binary_op!(Sub::sub[arg, imm]; [I8, I16, I32, I64, F32, F64]; inst),
+                    _ => unimplemented!(),
+                }?;
+                frame.set(first_result(frame.function, inst), result);
+                Ok(Continue)
+            }
+
             Branch {
                 opcode,
                 args,
@@ -236,12 +229,11 @@ impl Interpreter {
             } => match opcode {
                 IcmpImm => {
                     let arg_value = match *frame.get(arg) {
-                        // TODO implement TryInto for DataValue
-                        DataValue::I8(i)
-                        | DataValue::I16(i)
-                        | DataValue::I32(i)
-                        | DataValue::I64(i) => Ok(i as u64),
-                        _ => Err(InvalidType("integer".to_string(), arg)),
+                        DataValue::I8(i) => Ok(i as i64),
+                        DataValue::I16(i) => Ok(i as i64),
+                        DataValue::I32(i) => Ok(i as i64),
+                        DataValue::I64(i) => Ok(i),
+                        _ => Err(InvalidType("integer".to_string(), *arg)),
                     }?;
                     let imm_value = (*imm).into();
                     let result = match cond {
@@ -323,21 +315,7 @@ fn function_name_of_func_ref(func_ref: FuncRef, function: &Function) -> String {
         .to_string()
 }
 
-/// Cast an immediate integer to its correct [DataValue] representation.
-///
-/// TODO move to `impl DataValue`; parameterize on other input types? e.g. TryProm
-#[inline]
-fn cast(input: Imm64, ty: Type) -> Result<DataValue, Trap> {
-    match ty {
-        I8 => Ok(DataValue::I8(input.bits() as i8)),
-        I16 => Ok(DataValue::I16(input.bits() as i16)),
-        I32 => Ok(DataValue::I32(input.bits() as i32)),
-        I64 => Ok(DataValue::I64(input.bits() as i64)),
-        _ => unimplemented!(), // Err(Trap::InvalidType("integer".to_string())) // TO
-    }
-}
-
-/// Helper for calculating the type of an IR value.
+/// Helper for calculating the type of an IR value. TODO move to Frame?
 #[inline]
 fn type_of(value: ValueRef, function: &Function) -> Type {
     function.dfg.value_type(value)

@@ -31,6 +31,7 @@ cranelift-preopt = { path = "preopt", version = "0.62.0" }
 cranelift = { path = "umbrella", version = "0.62.0" }
 filecheck = "0.5.0"
 clap = "2.32.0"
+log = "0.4.8"
 serde = "1.0.8"
 term = "0.6.1"
 capstone = { version = "0.6.0", optional = true }
@@ -39,6 +40,7 @@ target-lexicon = "0.10"
 pretty_env_logger = "0.4.0"
 file-per-thread-logger = "0.1.2"
 indicatif = "0.13.0"
+thiserror = "1.0.15"
 walkdir = "2.2"
 cranelift-interpreter = { path = "interpreter", version = "0.1.0" }
 
