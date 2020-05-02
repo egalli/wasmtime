@@ -1,7 +1,8 @@
 use crate::spectest::link_spectest;
 use anyhow::{anyhow, bail, Context as _, Result};
+use std::fmt::Debug;
 use std::path::Path;
-use std::str;
+use std::{fmt, str};
 use wasmtime::*;
 use wast::parser::{self, ParseBuffer};
 use wast::Wat;
@@ -179,7 +180,7 @@ impl WastContext {
             if val_matches(v, e)? {
                 continue;
             }
-            bail!("expected {:?}, got {:?}", e, v)
+            bail!("expected {:?}, got {:?}", e, PrettyDebugVal(v))
         }
         Ok(())
     }
@@ -451,5 +452,17 @@ fn v128_matches(actual: u128, expected: &wast::V128Pattern) -> bool {
             let a = extract_lane_as_i64(actual, i) as u64;
             f64_matches(a, b)
         }),
+    }
+}
+
+struct PrettyDebugVal<'a>(&'a Val);
+
+impl<'a> Debug for PrettyDebugVal<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Val::V128(v) = self.0 {
+            write!(f, "{:?}", v.clone().to_le_bytes())
+        } else {
+            write!(f, "{:?}", self)
+        }
     }
 }
