@@ -732,6 +732,8 @@ version = "0.75.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
+ "cranelift-interpreter",
+ "log",
 ]
 
 [[package]]
