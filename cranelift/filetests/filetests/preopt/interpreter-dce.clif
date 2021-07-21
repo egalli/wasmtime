@@ -1,9 +1,10 @@
 test dce
 target x86_64
 
-;; This takes the output of preopt (SSCP) and examines after DCE. The results could be better: unnecessary blocks with
-;; their unnecessary constant declarations probably should be eliminated. TODO run this through the whole compile
-;; pipeline--all passes-- to see what happens.
+;; This takes the output of preopt (SSCP) and examines after DCE. The results
+;; could be better: unnecessary blocks with their unnecessary constant
+;; declarations probably should be eliminated. TODO run this through the whole
+;; compile pipeline--all passes--to see what happens.
 
 function %interpret() -> i32 system_v {
 block0:

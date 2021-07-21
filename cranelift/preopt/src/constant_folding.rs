@@ -451,7 +451,7 @@ impl Value for LatticeValue {
         use LatticeValue::*;
         match self {
             Constant(a) => a.convert(kind).map(LatticeValue::Constant),
-            _ => unimplemented!(),
+            _ => Ok(self),
         }
     }
 
@@ -472,6 +472,13 @@ impl Value for LatticeValue {
     fn uno(&self, other: &Self) -> ValueResult<bool> {
         match (self, other) {
             (LatticeValue::Constant(a), LatticeValue::Constant(b)) => Value::uno(a, b),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn overflow(&self, other: &Self) -> ValueResult<bool> {
+        match (self, other) {
+            (LatticeValue::Constant(a), LatticeValue::Constant(b)) => Value::overflow(a, b),
             _ => unimplemented!(),
         }
     }

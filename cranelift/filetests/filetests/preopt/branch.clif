@@ -84,8 +84,8 @@ block0(v0: i32):
     v1 = iconst.i32 42
     jump block1(v1, v0)
 block1(v10: i32, v11: i32):
-    ; We know that the output of this loop is constant: we continually add 0 to it. SSCP should replace this with
-    ; v15 = const.i32 42
+    ; We know that the output of this loop is constant: we continually add 0 to
+    ; it. SSCP should replace this with: `v15 = const.i32 42`
     v15 = iadd_imm v10, 0
     ; Loop using counter in v11.
     v16 = iadd_imm v11, -1
@@ -94,8 +94,9 @@ block1(v10: i32, v11: i32):
     ; Exit once we count down to 0.
     jump block2(v15)
 block2(v20: i32):
-    ; At this point, SSCP should know that v10 = 42, but the loop remains since we do not have an optimization that can
-    ; prove the loop useless and remove it.
+    ; At this point, SSCP should know that v10 = 42, but the loop remains since
+    ; we do not have an optimization that can prove the loop useless and remove
+    ; it.
     v21 = iadd_imm v20, 1
     return v21
 }
