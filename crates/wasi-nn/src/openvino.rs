@@ -5,7 +5,7 @@ use openvino::{InferenceError, Layout, Precision, SetupError, TensorDesc};
 use std::sync::Arc;
 
 #[derive(Default)]
-struct OpenvinoBackend(Option<openvino::Core>);
+pub(crate) struct OpenvinoBackend(Option<openvino::Core>);
 
 impl Backend for OpenvinoBackend {
     fn name(&self) -> &str {
