@@ -3860,6 +3860,7 @@ dependencies = [
  "anyhow",
  "log",
  "openvino",
+ "rand 0.8.3",
  "thiserror",
  "walkdir",
  "wasmtime",

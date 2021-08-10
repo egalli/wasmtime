@@ -4,6 +4,7 @@ use crate::api::{Backend, BackendError, BackendExecutionContext, BackendGraph};
 use crate::openvino::OpenvinoBackend;
 use crate::r#impl::UsageError;
 use crate::witx::types::{Graph, GraphEncoding, GraphExecutionContext};
+use rand::Rng;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -65,14 +66,12 @@ pub(crate) type WasiNnResult<T> = std::result::Result<T, WasiNnError>;
 /// Record handle entries in a table.
 pub struct Table<K, V> {
     entries: HashMap<K, V>,
-    next_key: u32,
 }
 
 impl<K, V> Default for Table<K, V> {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
-            next_key: 0,
         }
     }
 }
@@ -82,7 +81,10 @@ where
     K: Eq + Hash + From<u32> + Copy,
 {
     pub fn insert(&mut self, value: V) -> K {
-        let key = self.use_next_key();
+        let key = self.use_random_key();
+        if self.entries.contains_key(&key) {
+            panic!("using the same random key for a table handle");
+        }
         self.entries.insert(key, value);
         key
     }
@@ -91,10 +93,9 @@ where
         self.entries.get_mut(&key)
     }
 
-    fn use_next_key(&mut self) -> K {
-        let current = self.next_key;
-        self.next_key += 1;
-        K::from(current)
+    fn use_random_key(&mut self) -> K {
+        let next: u32 = rand::thread_rng().gen();
+        K::from(next)
     }
 }
 
