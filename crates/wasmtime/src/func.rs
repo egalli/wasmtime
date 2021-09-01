@@ -1567,6 +1567,7 @@ impl<T> Caller<'_, T> {
         {
             Extern::Func(f) => Some(Extern::Func(f)),
             Extern::Memory(f) => Some(Extern::Memory(f)),
+            Extern::Table(t) => Some(Extern::Table(t)),
             // Intentionally ignore other Extern items here since this API is
             // supposed to be a temporary stop-gap until interface types.
             _ => None,
