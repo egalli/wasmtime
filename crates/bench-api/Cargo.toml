@@ -21,6 +21,7 @@ wasmtime = { path = "../wasmtime", default-features = true }
 wasmtime-wasi = { path = "../wasi" }
 wasmtime-wasi-crypto = { path = "../wasi-crypto", optional = true }
 wasmtime-wasi-nn = { path = "../wasi-nn", optional = true }
+wasmtime-wasi-parallel = { path = "../wasi-parallel", optional = true }
 wasi-cap-std-sync = { path = "../wasi-common/cap-std-sync" }
 cap-std = "0.18.0"
 
@@ -31,4 +32,5 @@ wat = "1.0"
 default = ["shuffling-allocator"]
 wasi-crypto = ["wasmtime-wasi-crypto"]
 wasi-nn = ["wasmtime-wasi-nn"]
+wasi-parallel = ["wasmtime-wasi-parallel"]
 old-x86-backend = ["wasmtime/old-x86-backend"]

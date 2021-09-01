@@ -19,6 +19,9 @@ use wasmtime_wasi_nn::WasiNnCtx;
 #[cfg(feature = "wasi-crypto")]
 use wasmtime_wasi_crypto::WasiCryptoCtx;
 
+#[cfg(feature = "wasi-parallel")]
+use wasmtime_wasi_parallel::WasiParallel;
+
 fn parse_module(s: &OsStr) -> Result<PathBuf, OsString> {
     // Do not accept wasmtime subcommand names as the module name
     match s.to_str() {
@@ -153,6 +156,7 @@ impl RunCommand {
             &argv,
             &self.vars,
             &self.common.wasi_modules.unwrap_or(WasiModules::default()),
+            &self.module,
         )?;
 
         // Load the preload wasm modules.
@@ -368,6 +372,8 @@ struct Host {
     wasi_nn: Option<WasiNnCtx>,
     #[cfg(feature = "wasi-crypto")]
     wasi_crypto: Option<WasiCryptoCtx>,
+    #[cfg(feature = "wasi-parallel")]
+    wasi_parallel: Option<WasiParallel>,
 }
 
 /// Populates the given `Linker` with WASI APIs.
@@ -378,6 +384,7 @@ fn populate_with_wasi(
     argv: &[String],
     vars: &[(String, String)],
     wasi_modules: &WasiModules,
+    module_path: &PathBuf,
 ) -> Result<()> {
     if wasi_modules.wasi_common {
         wasmtime_wasi::add_to_linker(linker, |host| host.wasi.as_mut().unwrap())?;
@@ -412,6 +419,29 @@ fn populate_with_wasi(
         {
             wasmtime_wasi_crypto::add_to_linker(linker, |host| host.wasi_crypto.as_mut().unwrap())?;
             store.data_mut().wasi_crypto = Some(WasiCryptoCtx::new());
+        }
+    }
+
+    if wasi_modules.wasi_parallel {
+        #[cfg(not(feature = "wasi-parallel"))]
+        {
+            bail!("Cannot enable wasi-parallel when the binary is not compiled with this feature.");
+        }
+        #[cfg(feature = "wasi-parallel")]
+        {
+            wasmtime_wasi_parallel::add_to_linker(linker, |host| {
+                host.wasi_parallel.as_mut().unwrap()
+            })?;
+            let module_bytes = std::fs::read(module_path)?;
+            let spirv_sections = if let Ok(sections) =
+                wasmtime_wasi_parallel::find_custom_spirv_sections(&module_bytes)
+            {
+                sections
+            } else {
+                log::warn!("unable to find wasi-parallel custom sections");
+                Vec::new()
+            };
+            store.data_mut().wasi_parallel = Some(WasiParallel::new(spirv_sections));
         }
     }
 

@@ -389,6 +389,9 @@ struct HostState {
 
     #[cfg(feature = "wasi-crypto")]
     wasi_crypto: wasmtime_wasi_crypto::WasiCryptoCtx,
+
+    #[cfg(feature = "wasi-parallel")]
+    wasi_parallel: wasmtime_wasi_parallel::WasiParallel,
 }
 
 impl BenchState {
@@ -432,6 +435,9 @@ impl BenchState {
 
         #[cfg(feature = "wasi-crypto")]
         wasmtime_wasi_crypto::add_to_linker(&mut linker, |cx| &mut cx.wasi_crypto)?;
+
+        #[cfg(feature = "wasi-parallel")]
+        wasmtime_wasi_parallel::add_to_linker(&mut linker, |cx| &mut cx.wasi_nn)?;
 
         Ok(Self {
             linker,
