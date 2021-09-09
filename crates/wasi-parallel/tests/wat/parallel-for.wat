@@ -13,7 +13,7 @@ implementation that allows a CPU-run kernel to modify the module's memory. ;)
         (param $out_buffers_len i32)
         (result i32)))
 
-    (table (export "table") 1 funcref)
+    (table (export "__indirect_function_table") 1 funcref)
     (elem (i32.const 0) $kernel)
 
     (memory (export "memory") 1)

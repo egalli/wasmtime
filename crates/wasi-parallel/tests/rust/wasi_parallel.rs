@@ -198,14 +198,13 @@ pub fn parallel_for(
                 *((base + 0) as *mut i32) = e.0;
             }
         }
-        let ptr8 = RET_AREA.as_mut_ptr() as i32;
         #[link(wasm_import_module = "wasi_ephemeral_parallel")]
         extern "C" {
             #[cfg_attr(target_arch = "wasm32", link_name = "parallel_for")]
             #[cfg_attr(not(target_arch = "wasm32"), link_name = "input_parallel_for")]
-            fn witx_import(_: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32);
+            fn witx_import(_: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32) -> i32;
         }
-        witx_import(
+        let result = witx_import(
             kernel as i32,
             num_threads as i32,
             block_size as i32,
@@ -213,17 +212,12 @@ pub fn parallel_for(
             len6,
             result7 as i32,
             len7,
-            ptr8,
         );
         std::alloc::dealloc(result6, layout6);
         std::alloc::dealloc(result7, layout7);
-        match *((ptr8 + 0) as *const i32) {
+        match result {
             0 => Ok(()),
-            1 => Err(match *((ptr8 + 8) as *const i32) {
-                0 => ParErrno::Success,
-                _ => panic!("invalid enum discriminant"),
-            }),
-            _ => panic!("invalid enum discriminant"),
+            _ => Err(ParErrno::Error(result)),
         }
     }
 }

@@ -126,16 +126,20 @@ pub(crate) fn get_exported_table_function<T>(
     caller: &mut Caller<T>,
     function_index: u32,
 ) -> Result<Func, Trap> {
-    let table = match caller.get_export("table") {
+    let table = match caller.get_export("__indirect_function_table") {
         Some(Extern::Table(t)) => t,
-        _ => return Err(Trap::new("wasi-parallel requires a 'table' export")),
+        _ => {
+            return Err(Trap::new(
+                "wasi-parallel requires a '__indirect_function_table' export",
+            ))
+        }
     };
 
     match table.get(caller, function_index) {
         Some(Val::FuncRef(Some(f))) => Ok(f),
         _ => {
             return Err(Trap::new(
-                "the 'table' export does not contain a funcref at the given index",
+                "the '__indirect_function_table' export does not contain a funcref at the given index",
             ));
         }
     }
