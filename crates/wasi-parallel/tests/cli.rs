@@ -22,3 +22,9 @@ fn run_parallel_for() {
 fn run_buffer() {
     cli("tests/wasm/buffer.wasm").unwrap();
 }
+
+#[cfg(feature = "opencl")]
+#[test]
+fn run_fill() {
+    cli("tests/wasm/fill.wasm").unwrap();
+}
