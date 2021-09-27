@@ -100,7 +100,7 @@ impl super::Device for Device {
 
         let devices = [self.context.device.clone()];
 
-        let program = core::create_program_with_binary(&self.context.context, &devices, &[&spirv])
+        let program = core::create_program_with_il(&self.context.context, &spirv, None)
             .map_err(Error::msg)?;
 
         let options = CString::new("").expect("CString::new failed");
@@ -138,8 +138,8 @@ impl super::Device for Device {
                 &kernel,
                 1,
                 None,
-                &[num_threads as usize, 0, 0],
-                Some([block_size as usize, 0, 0]),
+                &[(block_size * num_threads) as usize, 0, 0],
+                Some([num_threads as usize, 0, 0]),
                 None::<core::Event>,
                 None::<&mut core::Event>,
             )
@@ -197,8 +197,8 @@ impl Buffer {
                 &self.context.context,
                 match self.access {
                     Write => MemFlags::WRITE_ONLY,
-                    Read => MemFlags::READ_ONLY,
-                    ReadWrite => MemFlags::READ_WRITE,
+                    Read => MemFlags::READ_ONLY | MemFlags::COPY_HOST_PTR,
+                    ReadWrite => MemFlags::READ_WRITE | MemFlags::COPY_HOST_PTR,
                 },
                 self.len as usize,
                 data,

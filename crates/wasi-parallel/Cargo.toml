@@ -28,7 +28,7 @@ rand = "0.8"
 scoped_threadpool = "0.1"
 threadpool = "1.8"
 wasmparser = "0.80.1"
-ocl-core = { version = "0.11", optional = true }
+ocl-core = { version = "0.11", optional = true, features=["opencl_version_2_1"] }
 
 # These dependencies are needed for the examples:
 structopt = "0.3"
