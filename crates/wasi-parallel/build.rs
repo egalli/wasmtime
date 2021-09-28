@@ -3,6 +3,7 @@
 //!  - generates Wasm from the files in `tests/rust` to `tests/wasm`
 use std::{
     env,
+    fs::DirBuilder,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -18,40 +19,65 @@ fn main() {
         println!("cargo:rerun-if-changed={}", entry.unwrap().path().display());
     }
 
+    println!("cargo:rerun-if-changed=tests/cpp/wasi_parallel.h");
+
+    build_wasm("tests");
+    build_wasm("benches");
+}
+
+fn build_wasm<P: AsRef<Path>>(root: P) {
+    let root_dir = Path::new(root.as_ref().as_os_str());
+    let wasm_dir = root_dir.join("wasm");
+
+    DirBuilder::new().recursive(true).create(&wasm_dir).unwrap();
+
     #[cfg(feature = "opencl")]
-    for entry in walkdir::WalkDir::new("tests/cl/") {
-        let entry = entry.unwrap();
-        println!("cargo:rerun-if-changed={}", entry.path().display());
-        if entry.path().is_file() {
-            compile_cl(entry.path(), "tests/spv")
+    if root_dir.join("cl").exists() {
+        DirBuilder::new()
+            .recursive(true)
+            .create(root_dir.join("spv"))
+            .unwrap();
+        for entry in walkdir::WalkDir::new(root_dir.join("cl")) {
+            let entry = entry.unwrap();
+            println!("cargo:rerun-if-changed={}", entry.path().display());
+            if entry.path().is_file() {
+                compile_cl(entry.path(), root_dir.join("spv"))
+            }
         }
     }
 
     // Automatically rebuild any Rust tests.
-    for entry in walkdir::WalkDir::new("tests/rust/") {
-        let entry = entry.unwrap();
-        println!("cargo:rerun-if-changed={}", entry.path().display());
-        if entry.path().is_file() && entry.file_name() != "wasi_parallel.rs" {
-            compile_rust(entry.path(), "tests/wasm")
+    if root_dir.join("rust").exists() {
+        for entry in walkdir::WalkDir::new(root_dir.join("rust")) {
+            let entry = entry.unwrap();
+            println!("cargo:rerun-if-changed={}", entry.path().display());
+            if entry.path().is_file() && entry.file_name() != "wasi_parallel.rs" {
+                compile_rust(entry.path(), &wasm_dir)
+            }
         }
     }
 
-    println!("cargo:rerun-if-changed=tests/cpp/wasi_parallel.h");
-    for entry in walkdir::WalkDir::new("tests/cpp/") {
-        let entry = entry.unwrap();
-        println!("cargo:rerun-if-changed={}", entry.path().display());
-        if entry.path().is_file() && entry.file_name() != "wasi_parallel.h" {
-            #[cfg(feature = "opencl")]
-            let spirv_file = spirv_file(entry.path(), "tests/spv");
-            #[cfg(feature = "opencl")]
-            if spirv_file.exists() {
-                let temp_file = compile_cpp(entry.path(), env::var("OUT_DIR").unwrap());
-                attach_spirv(temp_file, spirv_file, "tests/wasm")
-            } else {
-                compile_cpp(entry.path(), "tests/wasm");
+    if root_dir.join("cpp").exists() {
+        #[cfg(feature = "opencl")]
+        let temp_dir = Path::new(&env::var("OUT_DIR").unwrap()).join(&root_dir);
+        #[cfg(feature = "opencl")]
+        DirBuilder::new().recursive(true).create(&temp_dir).unwrap();
+        for entry in walkdir::WalkDir::new(root_dir.join("cpp")) {
+            let entry = entry.unwrap();
+            println!("cargo:rerun-if-changed={}", entry.path().display());
+            if entry.path().is_file() && entry.file_name() != "wasi_parallel.h" {
+                #[cfg(feature = "opencl")]
+                let spirv_file = spirv_file(entry.path(), root_dir.join("spv"));
+                #[cfg(feature = "opencl")]
+                if spirv_file.exists() {
+                    let temp_file = compile_cpp(entry.path(), &temp_dir);
+                    attach_spirv(temp_file, spirv_file, &wasm_dir)
+                } else {
+                    compile_cpp(entry.path(), &wasm_dir);
+                }
+                #[cfg(not(feature = "opencl"))]
+                compile_cpp(entry.path(), &wasm_dir);
             }
-            #[cfg(not(feature = "opencl"))]
-            compile_cpp(entry.path(), "tests/wasm");
         }
     }
 }
@@ -93,6 +119,7 @@ fn compile_cpp<P1: AsRef<Path>, P2: AsRef<Path>>(source_file: P1, destination_di
 
     let mut command = Command::new("clang");
     command
+        .arg("-O3")
         .arg("--target=wasm32-wasi")
         .arg("-Xlinker")
         .arg("--export-table")

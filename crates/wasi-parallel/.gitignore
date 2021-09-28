@@ -1,3 +1,5 @@
 *.bin
 /tests/wasm/*
 /tests/spv/*
+/bench/wasm/*
+/bench/spv/*
