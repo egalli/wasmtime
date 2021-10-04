@@ -54,3 +54,7 @@ harness = false
 [[bench]]
 name = "arithmetic"
 harness = false
+
+[[bench]]
+name = "matrix_mul"
+harness = false
